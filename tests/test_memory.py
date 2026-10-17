@@ -164,3 +164,15 @@ def test_config_env_memory():
 def test_real_free_ram_reader_returns_number_or_none():
     v = REAL_FREE_RAM()  # imported before the autouse patch
     assert v is None or v > 0
+
+
+def test_default_min_free_is_2048(cfg, fake_cu, monkeypatch):
+    from mcp_computer_use.config import Config
+    assert Config().min_free_mb == 2048
+    monkeypatch.setattr(memory, "free_ram_mb", lambda: 3800.0)  # above 2 GB: stay loaded
+    o = FakeOllama(cfg)
+    res = core.look_at_screen("q", "Claude", cfg, o.client, client="codex", session_id="s")
+    assert o.unloads == 0 and "unloaded_low_memory" not in res["memory"]
+    monkeypatch.setattr(memory, "free_ram_mb", lambda: 1900.0)
+    core.look_at_screen("q2", "Claude", cfg, o.client, client="codex", session_id="s")
+    assert o.unloads == 1

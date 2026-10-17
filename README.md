@@ -56,7 +56,7 @@ sanitized to `[A-Za-z0-9_-]`, max 64 chars.
 - Single call, no active session: the model stays loaded **3 min** (`MCP_CU_KEEP_ALIVE_IDLE`).
 - Active session (any `.sessions` file updated in the last 10 min) or `keep_warm=true`: **10 min**
   (`MCP_CU_KEEP_ALIVE_SESSION`), so the model is released 10 min after the last call.
-- Memory pressure: free RAM is checked before and after each call; below **4096 MB** (`MCP_CU_MIN_FREE_MB`, 0 = off)
+- Memory pressure: free RAM is checked before and after each call; below **2048 MB** (`MCP_CU_MIN_FREE_MB`, 0 = off)
   the model is unloaded right after answering, even mid-session. A background thread in the server
   (`MCP_CU_MEMORY_WATCH=1`, every `MCP_CU_MEMORY_WATCH_INTERVAL`=30 s) does the same while the model is loaded.
 - Callers should call **`release_model()` at the end of a task**. Each answer has a `memory` field
@@ -127,7 +127,7 @@ Priority: defaults < TOML file < env vars. File: `mcp-computer-use.toml` in the 
 | `MCP_CU_SESSION_TTL_HOURS` | `24` |
 | `MCP_CU_KEEP_ALIVE_IDLE` / `MCP_CU_KEEP_ALIVE_SESSION` | `3m` / `10m` |
 | `MCP_CU_SESSION_ACTIVE_MINUTES` | `10` |
-| `MCP_CU_MIN_FREE_MB` | `4096` (0 = never unload for memory) |
+| `MCP_CU_MIN_FREE_MB` | `2048` (0 = never unload for memory) |
 | `MCP_CU_MEMORY_WATCH` / `MCP_CU_MEMORY_WATCH_INTERVAL` | `true` / `30` |
 
 Optional HTTP health: `MCP_CU_HEALTH_HTTP=1` (or `--health-http`) → `GET http://127.0.0.1:8765/health`
@@ -238,7 +238,7 @@ MIT
 ### שחרור זיכרון חכם
 - קריאה בודדת בלי סשן פעיל: המודל נשאר טעון **3 דקות** (`MCP_CU_KEEP_ALIVE_IDLE`).
 - כשיש סשן פעיל (קובץ ב-`.sessions` שעודכן ב-10 הדקות האחרונות) או כשנשלח `keep_warm=true`: **10 דקות** (`MCP_CU_KEEP_ALIVE_SESSION`). המודל משתחרר 10 דקות אחרי הקריאה האחרונה.
-- לחץ זיכרון: לפני כל קריאה ואחריה נבדק כמה RAM פנוי. אם נשארו פחות מ-**4096MB** (`MCP_CU_MIN_FREE_MB`, ‏0 מכבה), המודל נפרק מיד אחרי התשובה, גם באמצע סשן. בנוסף, חוט רקע בשרת בודק כל 30 שניות כשהמודל טעון ועושה אותו דבר (`MCP_CU_MEMORY_WATCH=1`).
+- לחץ זיכרון: לפני כל קריאה ואחריה נבדק כמה RAM פנוי. אם נשארו פחות מ-**2048MB** (`MCP_CU_MIN_FREE_MB`, ‏0 מכבה), המודל נפרק מיד אחרי התשובה, גם באמצע סשן. בנוסף, חוט רקע בשרת בודק כל 30 שניות כשהמודל טעון ועושה אותו דבר (`MCP_CU_MEMORY_WATCH=1`).
 - כדאי שהלקוח יקרא ל-**`release_model()` בסוף המשימה**. הכלי פורק את המודל מיד ומחזיר כמה זיכרון שוחרר (`freed_mb`). בכל תשובה יש שדה `memory`.
 
 ### סשנים (הקשר בין קריאות, אופציונלי)
