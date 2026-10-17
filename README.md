@@ -26,7 +26,8 @@ This server does the reading **locally**:
 | Tool | Description |
 |---|---|
 | `look_at_screen(question, app=None, client=None, session_id=None)` | Reads one window and answers. If `app` is omitted, the app named in the question (also Hebrew aliases like "קלוד") or the frontmost app is used. `client` / `session_id` are optional (see *Sessions*). |
-| `health()` | Ollama reachable, model pulled, model loaded, memory, agent-cu installed. |
+| `release_model()` | Unloads the model now and returns `freed_mb`. Call it at the end of a task. |
+| `health()` | Ollama reachable, model pulled, model loaded, memory, free RAM, current keep_alive policy, agent-cu installed. |
 
 No click / type tools: it is read-only by design.
 
@@ -50,6 +51,16 @@ sanitized to `[A-Za-z0-9_-]`, max 64 chars.
   A `session_id` without `client` uses client `default`.
 - Files not updated for 24 h are deleted on every call (`MCP_CU_SESSION_TTL_HOURS`). Folder: `MCP_CU_SESSIONS_DIR`.
   No in-memory state is kept.
+
+### Memory release (smart keep_alive)
+- Single call, no active session: the model stays loaded **3 min** (`MCP_CU_KEEP_ALIVE_IDLE`).
+- Active session (any `.sessions` file updated in the last 10 min) or `keep_warm=true`: **10 min**
+  (`MCP_CU_KEEP_ALIVE_SESSION`), so the model is released 10 min after the last call.
+- Memory pressure: free RAM is checked before and after each call; below **4096 MB** (`MCP_CU_MIN_FREE_MB`, 0 = off)
+  the model is unloaded right after answering, even mid-session. A background thread in the server
+  (`MCP_CU_MEMORY_WATCH=1`, every `MCP_CU_MEMORY_WATCH_INTERVAL`=30 s) does the same while the model is loaded.
+- Callers should call **`release_model()` at the end of a task**. Each answer has a `memory` field
+  (`keep_alive`, `reason`, `was_loaded`, `free_ram_mb`, `unloaded_low_memory`). CLI: `mcp-computer-use --release`.
 
 Success:
 ```json
@@ -114,6 +125,10 @@ Priority: defaults < TOML file < env vars. File: `mcp-computer-use.toml` in the 
 | `MCP_CU_SNAPSHOT_DETAILS` | `true` (extra `agent-cu snapshot` for Claude details) |
 | `MCP_CU_SESSIONS_DIR` | `<project>/.sessions` (else `~/.mcp-computer-use/sessions`) |
 | `MCP_CU_SESSION_TTL_HOURS` | `24` |
+| `MCP_CU_KEEP_ALIVE_IDLE` / `MCP_CU_KEEP_ALIVE_SESSION` | `3m` / `10m` |
+| `MCP_CU_SESSION_ACTIVE_MINUTES` | `10` |
+| `MCP_CU_MIN_FREE_MB` | `4096` (0 = never unload for memory) |
+| `MCP_CU_MEMORY_WATCH` / `MCP_CU_MEMORY_WATCH_INTERVAL` | `true` / `30` |
 
 Optional HTTP health: `MCP_CU_HEALTH_HTTP=1` (or `--health-http`) → `GET http://127.0.0.1:8765/health`
 (200 when ok, 503 otherwise).
@@ -140,6 +155,7 @@ The server sends these rules to clients on initialize (MCP `instructions`) and i
   (max 300 chars, `MCP_CU_MAX_QUESTION_CHARS`), pass `app` when known, **step by step** for bigger checks,
   never ask it to click/type, and follow `error.suggestion`.
 - Optionally pass `client` + `session_id` and reuse them for the whole task to get context and `changed_since_last`.
+- Call `release_model()` when the task is done.
 - Longer questions return `QUESTION_TOO_LONG`. Multi-part questions (3+ `?` or a numbered/bulleted list) and
   mostly non-Latin questions are still answered, with a non-fatal `hint`.
 
@@ -167,6 +183,7 @@ use the `computer-use` MCP tool `look_at_screen` instead of running agent-cu or 
 - For bigger checks go step by step: first "Is Claude working or finished?", then "What is Claude's last message about?", then any detail.
 - Optional: pass `client="codex"` (your name) and a `session_id` you choose for the task (e.g. "check-claude"), and reuse both on every call of that task: answers get shorter and more accurate and `changed_since_last` shows what changed. A new session_id replaces the old one. Without them each call is independent (full re-read, no "what changed").
 - Use `details` (project, session, branch, next_step, failures, files) from the result directly.
+- When the task is done, call `release_model()` to free the local model's memory.
 - It is read-only: never ask it to click or type.
 - On `error`, follow `error.suggestion` (OLLAMA_UNREACHABLE → call `health()`; MODEL_TIMEOUT → retry once; QUESTION_TOO_LONG → split). If a `hint` is returned, apply it to the next call.
 ```
@@ -210,12 +227,19 @@ MIT
 
 ## הכלים
 - ‏`look_at_screen(question, app=None, client=None, session_id=None)`: קורא חלון אחד ועונה. בלי `app`, נבחרת התוכנה שמוזכרת בשאלה (כולל כינויים בעברית כמו "קלוד" ו"קודקס"), ואם אין כזו, החלון שבחזית. ‏`client` ו-`session_id` הם אופציונליים (ראו "סשנים").
-- ‏`health()`: בודק אם Ollama זמין, אם המודל הורד ונטען, כמה זיכרון הוא תופס ואם agent-cu מותקן.
+- ‏`release_model()`: פורק את המודל מהזיכרון מיד ומחזיר כמה זיכרון שוחרר. קוראים לו בסוף משימה.
+- ‏`health()`: בודק אם Ollama זמין, אם המודל הורד ונטען, כמה זיכרון הוא תופס, כמה RAM פנוי, מה מדיניות ה-keep_alive הנוכחית ואם agent-cu מותקן.
 
 אין כלים ללחיצה או להקלדה. השרת קורא בלבד.
 
 ### פרטים שהקוד שולף
 ב-Claude ‏(desktop ו-Claude Code) השרת קורא גם את עץ הנגישות (`agent-cu snapshot`) ומחזיר שדה `details` שממלא הקוד, לא המודל: הפרויקט (`project`), שם הסשן (`session`), הענף (`branch`), התיקייה (`folder`), הצעד הבא שהוצע (`next_step`, באנגלית ובעברית), כשלים כמו פקודת רקע שנכשלה (`failures`), קבצים כמו התקנה חדשה (`files`), משימות רקע (`background_tasks`), וכפתורי אישור שממתינים למשתמש (`waiting_for_user`). אפשר לכבות עם `MCP_CU_SNAPSHOT_DETAILS=0`.
+
+### שחרור זיכרון חכם
+- קריאה בודדת בלי סשן פעיל: המודל נשאר טעון **3 דקות** (`MCP_CU_KEEP_ALIVE_IDLE`).
+- כשיש סשן פעיל (קובץ ב-`.sessions` שעודכן ב-10 הדקות האחרונות) או כשנשלח `keep_warm=true`: **10 דקות** (`MCP_CU_KEEP_ALIVE_SESSION`). המודל משתחרר 10 דקות אחרי הקריאה האחרונה.
+- לחץ זיכרון: לפני כל קריאה ואחריה נבדק כמה RAM פנוי. אם נשארו פחות מ-**4096MB** (`MCP_CU_MIN_FREE_MB`, ‏0 מכבה), המודל נפרק מיד אחרי התשובה, גם באמצע סשן. בנוסף, חוט רקע בשרת בודק כל 30 שניות כשהמודל טעון ועושה אותו דבר (`MCP_CU_MEMORY_WATCH=1`).
+- כדאי שהלקוח יקרא ל-**`release_model()` בסוף המשימה**. הכלי פורק את המודל מיד ומחזיר כמה זיכרון שוחרר (`freed_mb`). בכל תשובה יש שדה `memory`.
 
 ### סשנים (הקשר בין קריאות, אופציונלי)
 ‏`client` (שם הלקוח, למשל `codex`) ו-`session_id` (שם שהלקוח בוחר, למשל `fix-ui`) הם **אופציונליים**. מותרים רק `A-Z a-z 0-9 _ -`, עד 64 תווים.
@@ -272,6 +296,7 @@ mcp-computer-use --ask "מה קלוד עושה?" --app Claude
 - בדיקה גדולה מפצלים ל**שלבים**: קודם המצב, אחר כך הפרטים.
 - לא מבקשים מהשרת ללחוץ או להקליד.
 - אפשר (לא חובה) לשלוח `client` ו-`session_id` ולהשתמש באותו זוג לאורך כל המשימה, כדי לקבל הקשר ו-`changed_since_last`.
+- בסוף המשימה קוראים ל-`release_model()`.
 - כשחוזרת שגיאה, פועלים לפי `suggestion`.
 
 שאלה ארוכה מדי מחזירה `QUESTION_TOO_LONG`. שאלה מרובת חלקים, או שאלה שכתובה ברובה לא באותיות לטיניות (למשל עברית), עדיין מקבלת תשובה, ואיתה `hint` עם הצעה לשיפור.

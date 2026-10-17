@@ -18,7 +18,10 @@ from pydantic import Field
 
 from . import core
 from .guidance import (INSTRUCTIONS, LOOK_DESCRIPTION, HEALTH_DESCRIPTION,
-                       QUESTION_DESCRIPTION, APP_DESCRIPTION, CLIENT_DESCRIPTION, SESSION_DESCRIPTION)
+                       QUESTION_DESCRIPTION, APP_DESCRIPTION, CLIENT_DESCRIPTION, SESSION_DESCRIPTION,
+                       RELEASE_DESCRIPTION, KEEP_WARM_DESCRIPTION)
+from .memory import MemoryWatcher
+from .ollama_client import OllamaClient
 from .config import Config, load_config
 
 
@@ -32,8 +35,14 @@ def build_server(cfg: Config) -> _Server:
         app: Annotated[str | None, Field(description=APP_DESCRIPTION)] = None,
         client: Annotated[str | None, Field(description=CLIENT_DESCRIPTION)] = None,
         session_id: Annotated[str | None, Field(description=SESSION_DESCRIPTION)] = None,
+        keep_warm: Annotated[bool, Field(description=KEEP_WARM_DESCRIPTION)] = False,
     ) -> dict:
-        return core.look_at_screen(question, app, cfg, client=client, session_id=session_id)
+        return core.look_at_screen(question, app, cfg, client=client, session_id=session_id,
+                                   keep_warm=bool(keep_warm))
+
+    @mcp.tool(description=RELEASE_DESCRIPTION)
+    def release_model() -> dict:
+        return core.release_model(cfg)
 
     @mcp.tool(description=HEALTH_DESCRIPTION)
     def health() -> dict:
@@ -72,6 +81,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--app", help="app for --ask")
     p.add_argument("--client", help="optional client name for --ask")
     p.add_argument("--session-id", help="optional session id for --ask (keeps context between runs)")
+    p.add_argument("--keep-warm", action="store_true", help="--ask: keep the model loaded 10 min")
+    p.add_argument("--release", action="store_true", help="unload the model now and print freed memory")
     p.add_argument("--health-http", action="store_true", help="also serve GET /health over HTTP")
     a = p.parse_args(argv)
     cfg = load_config(a.config)
@@ -86,9 +97,14 @@ def main(argv: list[str] | None = None) -> None:
     if a.health:
         return out(core.health(cfg))
     if a.ask:
-        return out(core.look_at_screen(a.ask, a.app, cfg, client=a.client, session_id=a.session_id))
+        return out(core.look_at_screen(a.ask, a.app, cfg, client=a.client, session_id=a.session_id,
+                                            keep_warm=a.keep_warm))
+    if a.release:
+        return out(core.release_model(cfg))
     if cfg.health_http:
         start_health_http(cfg)
+    if cfg.memory_watch:
+        MemoryWatcher(cfg, OllamaClient(cfg)).start()
     build_server(cfg).run("stdio")
 
 

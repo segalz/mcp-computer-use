@@ -26,6 +26,12 @@ New session
 
 
 @pytest.fixture(autouse=True)
+def _plenty_of_ram(monkeypatch):
+    from mcp_computer_use import memory
+    monkeypatch.setattr(memory, "free_ram_mb", lambda: 16000.0)
+
+
+@pytest.fixture(autouse=True)
 def _reset_stateless_hint():
     from mcp_computer_use import core
     core._stateless_calls.clear()

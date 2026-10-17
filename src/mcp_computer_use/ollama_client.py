@@ -72,7 +72,18 @@ class OllamaClient:
         model = model or self.cfg.model
         return any(_same_model(n, model) for n in self.models())
 
-    def chat_json(self, system: str, user: str, timeout: float) -> tuple[dict, dict]:
+    def unload(self, timeout: float = 15.0) -> None:
+        """Unload the model now (keep_alive=0 with an empty prompt)."""
+        try:
+            with self._client(timeout) as c:
+                r = c.post("/api/generate", json={"model": self.cfg.model, "prompt": "", "keep_alive": 0})
+        except httpx.HTTPError as e:
+            raise CuError(OLLAMA_UNREACHABLE, f"unload failed: {e}")
+        if r.status_code >= 400:
+            raise CuError(MODEL_FAILED, f"unload HTTP {r.status_code}: {r.text[:200]}")
+
+    def chat_json(self, system: str, user: str, timeout: float,
+                  keep_alive: str | int | None = None) -> tuple[dict, dict]:
         """Returns (parsed_answer, stats). Raises CuError on any failure."""
         model = self.cfg.model
         body = {
@@ -84,7 +95,7 @@ class OllamaClient:
             "options": {"num_ctx": self.cfg.num_ctx, "temperature": self.cfg.temperature},
             # gpt-oss only supports think levels; other models: disable thinking.
             "think": "low" if model.startswith("gpt-oss") else False,
-            "keep_alive": "15m",
+            "keep_alive": keep_alive if keep_alive is not None else self.cfg.keep_alive_idle,
         }
         try:
             with self._client(timeout) as c:

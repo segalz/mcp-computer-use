@@ -38,6 +38,12 @@ class Config:
     snapshot_details: bool = True   # extra `agent-cu snapshot` for project/session/branch (Claude)
     sessions_dir: str = ""          # default: <project>/.sessions (or ~/.mcp-computer-use/sessions)
     session_ttl_hours: float = 24.0  # session files not updated for longer are deleted
+    keep_alive_idle: str = "3m"      # single call, no active session
+    keep_alive_session: str = "10m"  # active session (file updated within session_active_minutes) or keep_warm
+    session_active_minutes: float = 10.0
+    min_free_mb: int = 4096          # free RAM below this -> unload right after answering (0 = off)
+    memory_watch: bool = True        # background thread unloads under memory pressure
+    memory_watch_interval: float = 30.0
     stateless_hint_window: float = 900.0  # seconds; repeated calls without session_id get a hint
 
 

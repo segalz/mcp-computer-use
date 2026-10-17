@@ -12,6 +12,7 @@ from .errors import CuError, APP_NOT_FOUND, QUESTION_TOO_LONG, EMPTY_QUESTION, e
 from .guidance import question_hints
 from .extractors import extract, wants_snapshot
 from .sessions import Session, sanitize
+from . import memory
 from .ollama_client import OllamaClient
 from .timeouts import compute_timeout
 
@@ -56,7 +57,8 @@ def _stateless_hint(client: str | None, cfg: Config) -> bool:
 
 def look_at_screen(question: str, app: str | None, cfg: Config,
                    ollama: OllamaClient | None = None,
-                   client: str | None = None, session_id: str | None = None) -> dict:
+                   client: str | None = None, session_id: str | None = None,
+                   keep_warm: bool = False) -> dict:
     t0 = time.monotonic()
     ollama = ollama or OllamaClient(cfg)
     elapsed = lambda: round(time.monotonic() - t0, 2)
@@ -143,6 +145,8 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
                                 None, None, cached=True))
 
     # 3) local model summarises only the short text
+    keep_alive, ka_reason = memory.keep_alive_for(cfg, session=session is not None, keep_warm=keep_warm)
+    free_before = memory.free_ram_mb()
     loaded = ollama.is_loaded()
     timeout = compute_timeout(len(ex.last_message), cfg, model_loaded=loaded)
     try:
@@ -150,10 +154,21 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
                                          build_user_message(question, target, detected, ex.last_message,
                                                             details, changed if session and not session.is_new else None,
                                                             previous),
-                                         timeout)
+                                         timeout, keep_alive=keep_alive)
     except CuError as e:
         return done(error_payload(e.code, e.message, windows_seen=[target], extracted=extracted,
                                   model_used=cfg.model, timeout_seconds=timeout, duration_seconds=elapsed()))
+    mem_info = {"keep_alive": keep_alive, "reason": ka_reason, "was_loaded": loaded}
+    memory_mb = ollama.model_memory_mb()
+    free_after = memory.free_ram_mb()
+    if memory.under_pressure(cfg, free_before) or memory.under_pressure(cfg, free_after):
+        try:
+            ollama.unload()
+            mem_info["unloaded_low_memory"] = True
+        except CuError:
+            pass
+    if free_after is not None:
+        mem_info["free_ram_mb"] = free_after
 
     status = answer.get("status") or detected
     if detected != "unknown" and status not in (detected, "waiting_for_user", "error"):
@@ -168,8 +183,10 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
             session.save(state, question, {"status": status, "summary": summary, "confidence": round(confidence, 2)})
         except OSError:
             pass
-    return done(_result(target, status, summary, confidence, details, session, changed, cfg, elapsed(),
-                        ollama.model_memory_mb(), stats.get("tokens_per_second")))
+    res = _result(target, status, summary, confidence, details, session, changed, cfg, elapsed(),
+                  memory_mb, stats.get("tokens_per_second"))
+    res["memory"] = mem_info
+    return done(res)
 
 
 def _result(target, status, summary, confidence, details, session, changed, cfg, duration,
@@ -195,6 +212,10 @@ def _result(target, status, summary, confidence, details, session, changed, cfg,
     return d
 
 
+def release_model(cfg: Config, ollama: OllamaClient | None = None) -> dict:
+    return memory.release(cfg, ollama or OllamaClient(cfg))
+
+
 def health(cfg: Config, ollama: OllamaClient | None = None) -> dict:
     ollama = ollama or OllamaClient(cfg)
     out = {"ok": False, "ollama_url": cfg.ollama_url, "model": cfg.model,
@@ -211,6 +232,13 @@ def health(cfg: Config, ollama: OllamaClient | None = None) -> dict:
         out["memory_mb"] = ollama.model_memory_mb()
     except CuError as e:
         out["problems"].append(e.message)
+    free = memory.free_ram_mb()
+    current, reason = memory.keep_alive_for(cfg)
+    out["memory"] = {"free_ram_mb": free, "min_free_mb": cfg.min_free_mb,
+                     "under_pressure": memory.under_pressure(cfg, free) if free is not None else None,
+                     "keep_alive_idle": cfg.keep_alive_idle, "keep_alive_session": cfg.keep_alive_session,
+                     "keep_alive_next_call": current, "policy_reason": reason,
+                     "memory_watch": cfg.memory_watch}
     path = agent_cu.resolve_cmd(cfg.agent_cu_cmd)
     out["agent_cu_available"] = bool(path)
     out["agent_cu_path"] = path

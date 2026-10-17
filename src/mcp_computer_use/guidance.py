@@ -14,6 +14,7 @@ How to call it:
 - For multi-part checks call several times, step by step: first the status, then the details. Do not pack several questions into one call.
 - Optional context: pass `client` (your name, e.g. "codex", "claude") and a `session_id` you choose (e.g. "fix-ui"), and reuse them on every call of the same task. The server then keeps a small context file between calls: answers get shorter and more accurate, and `changed_since_last` tells you what changed since your previous call. Sending a NEW session_id replaces (deletes) your previous one for that client. Without them every call is independent: the full screen is re-read, "what changed" is not possible, and no file is written.
 - `details` (filled by code, not the model) may hold project, session, branch, folder, next_step, failures, files, background_tasks; use it directly instead of asking again.
+- Memory: the local model stays loaded 3 min after a single call and 10 min while a session is active (or with keep_warm=true), and is unloaded early if free RAM gets low. When your task is done, call release_model() to free the memory right away.
 - It cannot click, type or change anything. Never ask it to.
 - If the result has `error`, follow `error.suggestion`: on OLLAMA_UNREACHABLE call health() first; on MODEL_TIMEOUT retry once; on APP_NOT_FOUND retry with an `app` from `available_apps`; on QUESTION_TOO_LONG split the question. `extracted` holds the short raw text you can still use.
 - A `hint` field is advice for your next call; the answer is still valid.
@@ -28,10 +29,19 @@ Read-only: never clicks or types. Pass `app` when known. For multi-part checks c
 `client` and `session_id` are OPTIONAL. Without them every call is independent: the full screen is
 re-read, no 'what changed' is possible and no file is written. With them the server keeps context
 between calls (more accurate, shorter answers, plus `changed_since_last`). Reuse the same pair for one
-task; sending a new session_id replaces the old one for that client."""
+task; sending a new session_id replaces the old one for that client.
+`keep_warm` (optional bool) keeps the model loaded 10 min instead of 3 when you will ask again soon.
+Call release_model() when your task is done."""
+
+RELEASE_DESCRIPTION = """\
+Unload the local model now and return freed memory_mb. Call it at the end of your task (after your last
+look_at_screen) so the RAM is free again. Safe to call when nothing is loaded."""
+KEEP_WARM_DESCRIPTION = ("Optional. true = keep the model loaded 10 min (session value) instead of 3 min, "
+                         "when you will ask again soon without a session_id.")
 
 HEALTH_DESCRIPTION = """\
-Check the backend before/after errors: Ollama reachable, model pulled and loaded, memory, agent-cu installed.
+Check the backend before/after errors: Ollama reachable, model pulled and loaded, memory, free RAM,
+current keep_alive policy, agent-cu installed.
 Call this first if look_at_screen returns OLLAMA_UNREACHABLE or MODEL_NOT_FOUND."""
 
 QUESTION_DESCRIPTION = ("One short, focused question in English (max 300 chars), "
