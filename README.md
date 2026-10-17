@@ -185,8 +185,25 @@ use the `computer-use` MCP tool `look_at_screen` instead of running agent-cu or 
 - Use `details` (project, session, branch, next_step, failures, files) from the result directly.
 - When the task is done, call `release_model()` to free the local model's memory.
 - It is read-only: never ask it to click or type.
+- To launch an app, run `powershell -ExecutionPolicy Bypass -File C:\Develop\mcp-computer-use\scripts\cu-open.ps1 <exe|path|uri>` instead of `agent-cu open`, then use the returned `app` with `agent-cu ... -a` and with `look_at_screen(app=...)` (UWP apps such as Calculator are addressed by their localized window title).
 - On `error`, follow `error.suggestion` (OLLAMA_UNREACHABLE → call `health()`; MODEL_TIMEOUT → retry once; QUESTION_TOO_LONG → split). If a `hint` is returned, apply it to the next call.
 ```
+
+## Launching apps: `scripts/cu-open.ps1`
+`agent-cu open calc.exe --wait` starts Calculator but then times out: it waits for an app literally named
+`calc.exe`, while UWP/packaged apps run inside `ApplicationFrameHost` with a localized title (e.g. `מחשבון`).
+`cu-open.ps1` launches anything `Start-Process` can (exe name, full path, `shell:` / `ms-settings:` /
+`calculator:` URIs), polls the open windows every 500 ms until a new window appears (or an existing
+single-instance window comes to the front), checks that `agent-cu snapshot -a <app>` works, and prints one JSON line:
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\Develop\mcp-computer-use\scripts\cu-open.ps1 calc.exe
+# {"ok":true,"app":"מחשבון","title":"מחשבון","process":"ApplicationFrameHost","pid":16708,"seconds":1.8,"hint":"UWP app hosted by ApplicationFrameHost: use -a 'מחשבון' (the window title).","verified":true}
+agent-cu snapshot -a 'מחשבון' -i -c --human
+```
+Options: `-Args '<arguments>'` (with `-File`, pass several arguments as one quoted string), `-TimeoutSec 15`,
+`-NoVerify` (skip the snapshot check). On timeout it prints `ok:false` with `error`, `new_windows_seen` and
+`frontmost`, and exits 1. Use the returned `app` with every `agent-cu ... -a`. It never closes or moves other windows.
+Output is UTF-8 (Hebrew titles are kept).
 
 ## Usage examples
 - `look_at_screen("Is Claude finished? What did it report?", "Claude")`
@@ -307,6 +324,15 @@ mcp-computer-use --ask "מה קלוד עושה?" --app Claude
 דוגמה לעבודה בשלבים: המשתמש כותב "תבדוק אם קלוד סיים ומה יצא". הסוכן שואל קודם `Is Claude working or finished?`, אחר כך `What is Claude's last message about?`, ועונה למשתמש בעברית.
 
 את קטע ההוראות לסוכנים (באנגלית, בחלק האנגלי וגם בקובץ `docs/AGENTS_SNIPPET.md`) מדביקים בקובץ `AGENTS.md` הגלובלי של Codex או בקובץ `CLAUDE.md` של Claude Code.
+
+## פתיחת תוכנות: `scripts/cu-open.ps1`
+הפקודה `agent-cu open calc.exe --wait` פותחת את המחשבון, אבל נכשלת בזמן קצוב: היא מחכה לתוכנה בשם `calc.exe`, בזמן שתוכנות UWP רצות בתוך `ApplicationFrameHost` עם כותרת מתורגמת (למשל `מחשבון`).
+הסקריפט `cu-open.ps1` פותח כל מה ש-`Start-Process` יודע לפתוח: שם קובץ, נתיב מלא, או כתובות כמו `ms-settings:` ו-`calculator:`. כל חצי שנייה הוא בודק אם נפתח חלון חדש (או אם חלון קיים של תוכנה שרצה במופע יחיד עבר לחזית), מוודא ש-`agent-cu snapshot -a <app>` עובד, ומדפיס שורת JSON אחת עם `ok`, ‏`app` (השם לשימוש ב-`agent-cu -a`), ‏`title`, ‏`process`, ‏`pid`, ‏`seconds` ו-`hint`.
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\Develop\mcp-computer-use\scripts\cu-open.ps1 calc.exe
+```
+אפשרויות: `-Args '<ארגומנטים>'` (עם `-File` מעבירים כמה ארגומנטים כמחרוזת אחת במרכאות), ‏`-TimeoutSec 15`, ו-`-NoVerify` לדילוג על הבדיקה. אם לא נפתח חלון בזמן, מוחזר `ok:false` עם הסבר, החלונות החדשים שנראו והחלון שבחזית. הסקריפט לא סוגר ולא מזיז חלונות אחרים, והפלט ב-UTF-8 כך שכותרות בעברית נשמרות.
+סוכנים צריכים לפתוח תוכנות תמיד דרך `cu-open.ps1` ולא דרך `agent-cu open`.
 
 ## דוגמאות
 - ‏`look_at_screen("Is Claude working or finished?", "Claude")`

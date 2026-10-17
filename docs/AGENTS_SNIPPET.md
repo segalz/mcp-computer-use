@@ -8,4 +8,5 @@ use the `computer-use` MCP tool `look_at_screen` instead of running agent-cu or 
 - Use `details` (project, session, branch, next_step, failures, files) from the result directly.
 - When the task is done, call `release_model()` to free the local model's memory.
 - It is read-only: never ask it to click or type.
+- To launch an app, run `powershell -ExecutionPolicy Bypass -File C:\Develop\mcp-computer-use\scripts\cu-open.ps1 <exe|path|uri>` instead of `agent-cu open`, then use the returned `app` with `agent-cu ... -a` and with `look_at_screen(app=...)` (UWP apps such as Calculator are addressed by their localized window title).
 - On `error`, follow `error.suggestion` (OLLAMA_UNREACHABLE → call `health()`; MODEL_TIMEOUT → retry once; QUESTION_TOO_LONG → split). If a `hint` is returned, apply it to the next call.
