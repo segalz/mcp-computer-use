@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-computer-use"
+version = "0.1.0"
+description = "Read-only MCP server: a local Ollama model reads the screen (via agent-cu) and returns a short JSON answer, saving tokens for coding agents."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+  "mcp>=1.2",
+  "httpx>=0.27",
+  "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+mcp-computer-use = "mcp_computer_use.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mcp_computer_use = ["prompts/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
