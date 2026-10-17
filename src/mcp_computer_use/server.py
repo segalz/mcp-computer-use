@@ -12,31 +12,29 @@ try:  # mcp 1.x
 except ImportError:  # mcp 2.x renamed FastMCP -> MCPServer
     from mcp.server.mcpserver import MCPServer as _Server
 
+from typing import Annotated
+
+from pydantic import Field
+
 from . import core
+from .guidance import (INSTRUCTIONS, LOOK_DESCRIPTION, HEALTH_DESCRIPTION,
+                       QUESTION_DESCRIPTION, APP_DESCRIPTION)
 from .config import Config, load_config
 
-INSTRUCTIONS = (
-    "Read-only screen reader. Call look_at_screen(question, app?) to ask what a window on this "
-    "computer shows (e.g. 'Is Claude finished?'). A local model reads the window and returns a short "
-    "JSON answer, so you never receive the raw window text. If the result has an `error`, follow its "
-    "`suggestion`; `extracted` holds the raw short text. Call health() if unsure the backend is up."
-)
 
 
 def build_server(cfg: Config) -> _Server:
     mcp = _Server("mcp-computer-use", instructions=INSTRUCTIONS)
 
-    @mcp.tool()
-    def look_at_screen(question: str, app: str | None = None) -> dict:
-        """Ask a question about what a window on this computer shows. Returns short JSON:
-        windows_seen, status, summary, confidence, model_used, duration_seconds, memory_mb.
-        `app` is optional (e.g. "Claude", "ChatGPT"); if omitted the best-matching or frontmost app is used.
-        Read-only: never clicks or types."""
+    @mcp.tool(description=LOOK_DESCRIPTION)
+    def look_at_screen(
+        question: Annotated[str, Field(description=QUESTION_DESCRIPTION)],
+        app: Annotated[str | None, Field(description=APP_DESCRIPTION)] = None,
+    ) -> dict:
         return core.look_at_screen(question, app, cfg)
 
-    @mcp.tool()
+    @mcp.tool(description=HEALTH_DESCRIPTION)
     def health() -> dict:
-        """Report whether Ollama is reachable, the model is pulled/loaded, and agent-cu is installed."""
         return core.health(cfg)
 
     return mcp

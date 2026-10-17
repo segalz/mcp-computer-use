@@ -7,7 +7,8 @@ from pathlib import Path
 
 from . import agent_cu
 from .config import Config
-from .errors import CuError, APP_NOT_FOUND, error_payload
+from .errors import CuError, APP_NOT_FOUND, QUESTION_TOO_LONG, EMPTY_QUESTION, error_payload
+from .guidance import question_hints
 from .extractors import extract
 from .ollama_client import OllamaClient
 from .timeouts import compute_timeout
@@ -34,6 +35,22 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
     elapsed = lambda: round(time.monotonic() - t0, 2)
     available: list[str] | None = None
 
+    # 0) validate the question (callers should send one short English question)
+    question = (question or "").strip()
+    if not question:
+        return error_payload(EMPTY_QUESTION, "question is empty", model_used=cfg.model, duration_seconds=elapsed())
+    if len(question) > cfg.max_question_chars:
+        return error_payload(QUESTION_TOO_LONG,
+                             f"question is {len(question)} chars; limit is {cfg.max_question_chars}",
+                             model_used=cfg.model, duration_seconds=elapsed())
+    hints = question_hints(question)
+    hint = " ".join(hints) or None
+
+    def done(d: dict) -> dict:
+        if hint:
+            d["hint"] = hint
+        return d
+
     # 1) pick the window
     try:
         if app:
@@ -52,8 +69,8 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
                 available = [a.name for a in agent_cu.list_apps(cfg.agent_cu_cmd, cfg.agent_cu_timeout)]
             except CuError:
                 pass
-        return error_payload(e.code, e.message, available_apps=available,
-                             model_used=cfg.model, duration_seconds=elapsed())
+        return done(error_payload(e.code, e.message, available_apps=available,
+                                  model_used=cfg.model, duration_seconds=elapsed()))
 
     # 2) code-based extraction (no model)
     ex = extract(raw, target, cfg.max_chars, cfg.generic_tail_chars)
@@ -68,8 +85,8 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
                                          build_user_message(question, target, ex.status, ex.last_message),
                                          timeout)
     except CuError as e:
-        return error_payload(e.code, e.message, windows_seen=[target], extracted=extracted,
-                             model_used=cfg.model, timeout_seconds=timeout, duration_seconds=elapsed())
+        return done(error_payload(e.code, e.message, windows_seen=[target], extracted=extracted,
+                                  model_used=cfg.model, timeout_seconds=timeout, duration_seconds=elapsed()))
 
     status = answer.get("status") or ex.status
     if ex.status != "unknown" and status not in (ex.status, "waiting_for_user", "error"):
@@ -78,7 +95,7 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
         confidence = max(0.0, min(1.0, float(answer.get("confidence", 0.5))))
     except (TypeError, ValueError):
         confidence = 0.5
-    return {
+    return done({
         "windows_seen": [target],          # filled by code, never by the model
         "status": status,
         "summary": str(answer.get("summary", "")).strip(),
@@ -87,7 +104,7 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
         "duration_seconds": elapsed(),
         "memory_mb": ollama.model_memory_mb(),
         "tokens_per_second": stats.get("tokens_per_second"),
-    }
+    })
 
 
 def health(cfg: Config, ollama: OllamaClient | None = None) -> dict:

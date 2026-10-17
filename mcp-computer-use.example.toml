@@ -5,6 +5,7 @@ model = "gpt-oss:20b"
 agent_cu_cmd = "agent-cu"
 agent_cu_timeout = 20
 max_chars = 2000
+max_question_chars = 300
 generic_tail_chars = 2000
 num_ctx = 4096
 temperature = 0
