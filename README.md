@@ -91,7 +91,7 @@ plus `cold_load_extra` when `/api/ps` shows the model is not loaded.
 ## Setup (Windows, PowerShell)
 Requirements: Python 3.10+, Node + `npm i -g agent-cu`, Ollama.
 ```powershell
-cd C:\developer\mcp-computer-use
+cd C:\Develop\mcp-computer-use
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
@@ -137,7 +137,7 @@ Optional HTTP health: `MCP_CU_HEALTH_HTTP=1` (or `--health-http`) → `GET http:
 **Codex** – `%USERPROFILE%\.codex\config.toml`:
 ```toml
 [mcp_servers.computer-use]
-command = 'C:\developer\mcp-computer-use\.venv\Scripts\mcp-computer-use.exe'
+command = 'C:\Develop\mcp-computer-use\.venv\Scripts\mcp-computer-use.exe'
 args = []
 env = { MCP_CU_OLLAMA_URL = "http://127.0.0.1:11435", MCP_CU_MODEL = "gpt-oss:20b" }
 startup_timeout_sec = 20
@@ -145,7 +145,7 @@ tool_timeout_sec = 120
 ```
 **Claude Code**:
 ```powershell
-claude mcp add computer-use --scope user -e MCP_CU_OLLAMA_URL=http://127.0.0.1:11435 -- C:\developer\mcp-computer-use\.venv\Scripts\mcp-computer-use.exe
+claude mcp add computer-use --scope user -e MCP_CU_OLLAMA_URL=http://127.0.0.1:11435 -- C:\Develop\mcp-computer-use\.venv\Scripts\mcp-computer-use.exe
 ```
 Then add the AGENTS.md / CLAUDE.md snippet below so agents use it correctly.
 
@@ -258,7 +258,7 @@ MIT
 </div>
 
 ```powershell
-cd C:\developer\mcp-computer-use
+cd C:\Develop\mcp-computer-use
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
