@@ -29,7 +29,7 @@ ddb86ca
 unchecked
 How is Claude doing this session?
 Environment
-JoinAIForce-Desktop
+MyApp-Desktop
 C:\
 Develop
 unchecked

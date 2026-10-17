@@ -15,7 +15,7 @@ SNAP = (FIX / "claude_code_snapshot.txt").read_text(encoding="utf-8")
 
 def test_text_only_details():
     d = extract(TEXT, "Claude").details
-    assert d["project"] == "JoinAIForce-Desktop"
+    assert d["project"] == "MyApp-Desktop"
     assert d["background_tasks"] == "1 running" and d["context_used"] == "93%"
     assert d["failures"] == ["Finished a background command (1 failed), ran 3 commands"]
     assert "אחרי ההתקנה אפשר לפתוח אותו מחדש" in d["next_step"]
@@ -24,10 +24,10 @@ def test_text_only_details():
 def test_snapshot_details():
     d = claude_snapshot_details(SNAP)
     assert d["session"] == "Multimodal work in progress"
-    assert d["project"] == "JoinAIForce-Desktop"
+    assert d["project"] == "MyApp-Desktop"
     assert d["folder"] == "C:\\Develop" and d["branch"] == "fix/pre-api"
     assert d["model"] == "Opus 5.5 Medium"
-    assert d["files"] == ["JoinAIForce QUAL_0.1.0_x64-setup.exe"]
+    assert d["files"] == ["MyApp_0.1.0_x64-setup.exe"]
     assert "waiting_for_user" not in d
 
 
@@ -63,7 +63,7 @@ def test_details_in_result_and_prompt(cfg, fake_cu):
     fake_cu.snaps["Claude"] = SNAP
     sent = []
     res = core.look_at_screen("Which project and session are open?", "Claude", cfg, make_ollama(cfg, record=sent))
-    assert res["details"]["project"] == "JoinAIForce-Desktop"
+    assert res["details"]["project"] == "MyApp-Desktop"
     assert res["details"]["session"] == "Multimodal work in progress"
     user = sent[0]["messages"][1]["content"]
     assert "<details>" in user and "fix/pre-api" in user
@@ -74,7 +74,7 @@ def test_details_in_result_and_prompt(cfg, fake_cu):
 def test_snapshot_failure_is_not_fatal(cfg, fake_cu):
     fake_cu.texts["Claude"] = TEXT  # no snapshot registered -> agent-cu snapshot exits 1
     res = core.look_at_screen("Which project?", "Claude", cfg, make_ollama(cfg))
-    assert "error" not in res and res["details"]["project"] == "JoinAIForce-Desktop"
+    assert "error" not in res and res["details"]["project"] == "MyApp-Desktop"
 
 
 def test_snapshot_disabled(cfg, fake_cu):

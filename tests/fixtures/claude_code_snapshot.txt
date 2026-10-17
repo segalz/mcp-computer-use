@@ -27,7 +27,7 @@ window "Claude"
                               statictext "Finished a background command (1 failed)"
                               [@e30] button "Finished a background command (1 failed), ran 3 commands"
                           statictext "גרסת התקנה חדשה:"
-                          [@e34] button "JoinAIForce QUAL_0.1.0_x64-setup.exe"
+                          [@e34] button "MyApp_0.1.0_x64-setup.exe"
                           statictext ", מ־16:08. אחרי ההתקנה אפשר לפתוח אותו מחדש."
                           [@e36] button "Compact session"
                       group "Session details"
@@ -37,8 +37,8 @@ window "Claude"
                           [@e46] button "Reorder Environment"
                           group id=_r_c3n_
                             group id=_r_c3q_
-                              statictext "JoinAIForce-Desktop"
-                          [@e47] button "JoinAIForce-Desktop" id=_r_c3v_
+                              statictext "MyApp-Desktop"
+                          [@e47] button "MyApp-Desktop" id=_r_c3v_
                           group id=_r_c44_
                             group "C:\Develop"
                               statictext "C:\"

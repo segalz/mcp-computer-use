@@ -67,7 +67,7 @@ Success:
 {"windows_seen": ["Claude"], "status": "finished",
  "summary": "Claude finished: 916 tests pass, commit be8b48e pushed, installer built.",
  "confidence": 0.95,
- "details": {"project": "JoinAIForce-Desktop", "session": "Multimodal work in progress", "branch": "fix/pre-api",
+ "details": {"project": "MyApp-Desktop", "session": "Multimodal work in progress", "branch": "fix/pre-api",
              "next_step": "After installing, reopen QUAL.", "failures": ["Finished a background command (1 failed)"]},
  "changed_since_last": ["status: working -> finished", "new text in the last message"],
  "session": {"client": "codex", "session_id": "bench"},
