@@ -19,7 +19,7 @@ from pydantic import Field
 from . import core
 from .guidance import (INSTRUCTIONS, LOOK_DESCRIPTION, HEALTH_DESCRIPTION,
                        QUESTION_DESCRIPTION, APP_DESCRIPTION, CLIENT_DESCRIPTION, SESSION_DESCRIPTION,
-                       RELEASE_DESCRIPTION, KEEP_WARM_DESCRIPTION)
+                       RELEASE_DESCRIPTION, KEEP_WARM_DESCRIPTION, PING_DESCRIPTION)
 from .memory import MemoryWatcher
 from .ollama_client import OllamaClient
 from .config import Config, load_config
@@ -39,6 +39,10 @@ def build_server(cfg: Config) -> _Server:
     ) -> dict:
         return core.look_at_screen(question, app, cfg, client=client, session_id=session_id,
                                    keep_warm=bool(keep_warm))
+
+    @mcp.tool(description=PING_DESCRIPTION)
+    def ping() -> dict:
+        return core.ping(cfg)
 
     @mcp.tool(description=RELEASE_DESCRIPTION)
     def release_model() -> dict:
@@ -82,6 +86,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--client", help="optional client name for --ask")
     p.add_argument("--session-id", help="optional session id for --ask (keeps context between runs)")
     p.add_argument("--keep-warm", action="store_true", help="--ask: keep the model loaded 10 min")
+    p.add_argument("--ping", action="store_true", help="heartbeat: server + Ollama (auto-start) + model 'pong'")
     p.add_argument("--release", action="store_true", help="unload the model now and print freed memory")
     p.add_argument("--health-http", action="store_true", help="also serve GET /health over HTTP")
     a = p.parse_args(argv)
@@ -99,6 +104,8 @@ def main(argv: list[str] | None = None) -> None:
     if a.ask:
         return out(core.look_at_screen(a.ask, a.app, cfg, client=a.client, session_id=a.session_id,
                                             keep_warm=a.keep_warm))
+    if a.ping:
+        return out(core.ping(cfg))
     if a.release:
         return out(core.release_model(cfg))
     if cfg.health_http:

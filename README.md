@@ -26,6 +26,7 @@ This server does the reading **locally**:
 | Tool | Description |
 |---|---|
 | `look_at_screen(question, app=None, client=None, session_id=None)` | Reads one window and answers. If `app` is omitted, the app named in the question (also Hebrew aliases like "קלוד") or the frontmost app is used. `client` / `session_id` are optional (see *Sessions*). |
+| `ping()` | Heartbeat: server up, local Ollama reachable (auto-started if needed), model replies `pong`. No screen reading. Returns `{ok, server, ollama, model_reply_ok, model, seconds, cold, error?}`. The first ping can take 30–50 s when the model is cold. CLI: `--ping`. |
 | `release_model()` | Unloads the model now and returns `freed_mb`. Call it at the end of a task. |
 | `health()` | Ollama reachable, model pulled, model loaded, memory, free RAM, current keep_alive policy, agent-cu installed. |
 
@@ -51,6 +52,16 @@ sanitized to `[A-Za-z0-9_-]`, max 64 chars.
   A `session_id` without `client` uses client `default`.
 - Files not updated for 24 h are deleted on every call (`MCP_CU_SESSION_TTL_HOURS`). Folder: `MCP_CU_SESSIONS_DIR`.
   No in-memory state is kept.
+
+### Ollama auto-start
+If `OLLAMA_URL` points at this machine (`127.0.0.1` / `localhost`) and Ollama does not answer, the server starts
+`ollama serve` itself: detached, hidden window, with `OLLAMA_HOST=127.0.0.1:<port from OLLAMA_URL>` set **only for
+the child process** (your global `OLLAMA_HOST`, e.g. a Mac, is never touched), then waits up to 10 s for `/api/tags`.
+- Checked on every call **without** a session and on the **first** call of a session (new session file); not on
+  every call inside a session. If a call inside a session fails with `OLLAMA_UNREACHABLE`, it starts Ollama once and retries once.
+- A port check plus a lock file (`.sessions/ollama-autostart.lock`) prevent double starts.
+- `ollama` is found on PATH or at `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`.
+- `MCP_CU_AUTOSTART_OLLAMA=0` disables it; `MCP_CU_AUTOSTART_TIMEOUT` (default 10). `health()` reports `ollama_autostarted`.
 
 ### Memory release (smart keep_alive)
 - Single call, no active session: the model stays loaded **3 min** (`MCP_CU_KEEP_ALIVE_IDLE`).
@@ -129,6 +140,7 @@ Priority: defaults < TOML file < env vars. File: `mcp-computer-use.toml` in the 
 | `MCP_CU_SESSION_ACTIVE_MINUTES` | `10` |
 | `MCP_CU_MIN_FREE_MB` | `2048` (0 = never unload for memory) |
 | `MCP_CU_MEMORY_WATCH` / `MCP_CU_MEMORY_WATCH_INTERVAL` | `true` / `30` |
+| `MCP_CU_AUTOSTART_OLLAMA` / `MCP_CU_AUTOSTART_TIMEOUT` | `true` / `10` (local URL only) |
 
 Optional HTTP health: `MCP_CU_HEALTH_HTTP=1` (or `--health-http`) → `GET http://127.0.0.1:8765/health`
 (200 when ok, 503 otherwise).
@@ -183,6 +195,7 @@ use the `computer-use` MCP tool `look_at_screen` instead of running agent-cu or 
 - For bigger checks go step by step: first "Is Claude working or finished?", then "What is Claude's last message about?", then any detail.
 - Optional: pass `client="codex"` (your name) and a `session_id` you choose for the task (e.g. "check-claude"), and reuse both on every call of that task: answers get shorter and more accurate and `changed_since_last` shows what changed. A new session_id replaces the old one. Without them each call is independent (full re-read, no "what changed").
 - Use `details` (project, session, branch, next_step, failures, files) from the result directly.
+- To check the bridge before a task, call `ping()` (the first ping can take 30-50 s while the model loads). If the local Ollama is down, the server starts it by itself.
 - When the task is done, call `release_model()` to free the local model's memory.
 - It is read-only: never ask it to click or type.
 - To launch an app, run `powershell -ExecutionPolicy Bypass -File C:\Develop\mcp-computer-use\scripts\cu-open.ps1 <exe|path|uri>` instead of `agent-cu open`, then use the returned `app` with `agent-cu ... -a` and with `look_at_screen(app=...)` (UWP apps such as Calculator are addressed by their localized window title).
@@ -244,6 +257,7 @@ MIT
 
 ## הכלים
 - ‏`look_at_screen(question, app=None, client=None, session_id=None)`: קורא חלון אחד ועונה. בלי `app`, נבחרת התוכנה שמוזכרת בשאלה (כולל כינויים בעברית כמו "קלוד" ו"קודקס"), ואם אין כזו, החלון שבחזית. ‏`client` ו-`session_id` הם אופציונליים (ראו "סשנים").
+- ‏`ping()`: בדיקת דופק. מוודא שהשרת עונה, ש-Ollama המקומי זמין (ומפעיל אותו אם צריך), ושהמודל עונה `pong`. לא קורא את המסך. מחזיר `{ok, server, ollama, model_reply_ok, model, seconds, cold, error?}`. הפינג הראשון יכול לקחת 30–50 שניות כשהמודל עוד לא טעון. משורת הפקודה: `--ping`.
 - ‏`release_model()`: פורק את המודל מהזיכרון מיד ומחזיר כמה זיכרון שוחרר. קוראים לו בסוף משימה.
 - ‏`health()`: בודק אם Ollama זמין, אם המודל הורד ונטען, כמה זיכרון הוא תופס, כמה RAM פנוי, מה מדיניות ה-keep_alive הנוכחית ואם agent-cu מותקן.
 
@@ -251,6 +265,13 @@ MIT
 
 ### פרטים שהקוד שולף
 ב-Claude ‏(desktop ו-Claude Code) השרת קורא גם את עץ הנגישות (`agent-cu snapshot`) ומחזיר שדה `details` שממלא הקוד, לא המודל: הפרויקט (`project`), שם הסשן (`session`), הענף (`branch`), התיקייה (`folder`), הצעד הבא שהוצע (`next_step`, באנגלית ובעברית), כשלים כמו פקודת רקע שנכשלה (`failures`), קבצים כמו התקנה חדשה (`files`), משימות רקע (`background_tasks`), וכפתורי אישור שממתינים למשתמש (`waiting_for_user`). אפשר לכבות עם `MCP_CU_SNAPSHOT_DETAILS=0`.
+
+### הפעלה אוטומטית של Ollama
+אם `OLLAMA_URL` מצביע על המחשב הזה (`127.0.0.1` או `localhost`) ו-Ollama לא עונה, השרת מפעיל בעצמו `ollama serve` ברקע, בחלון מוסתר, עם `OLLAMA_HOST=127.0.0.1:<הפורט מ-OLLAMA_URL>` **רק לתהליך הזה**. ה-`OLLAMA_HOST` הגלובלי שלך (למשל ה-Mac) לא משתנה. אחר כך הוא מחכה עד 10 שניות ש-`/api/tags` יענה.
+- הבדיקה נעשית בכל קריאה **בלי** סשן, ובקריאה **הראשונה** של כל סשן, לא בכל קריאה בתוך סשן. אם קריאה באמצע סשן נכשלת עם `OLLAMA_UNREACHABLE`, השרת מפעיל את Ollama פעם אחת ומנסה שוב פעם אחת.
+- בדיקת פורט וקובץ נעילה (`.sessions/ollama-autostart.lock`) מונעים הפעלה כפולה.
+- את `ollama` הוא מחפש ב-PATH או ב-`%LOCALAPPDATA%\Programs\Ollama\ollama.exe`.
+- ‏`MCP_CU_AUTOSTART_OLLAMA=0` מכבה את ההפעלה האוטומטית. ‏`health()` מדווח `ollama_autostarted`.
 
 ### שחרור זיכרון חכם
 - קריאה בודדת בלי סשן פעיל: המודל נשאר טעון **3 דקות** (`MCP_CU_KEEP_ALIVE_IDLE`).

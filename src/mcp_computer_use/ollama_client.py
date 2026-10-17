@@ -82,6 +82,29 @@ class OllamaClient:
         if r.status_code >= 400:
             raise CuError(MODEL_FAILED, f"unload HTTP {r.status_code}: {r.text[:200]}")
 
+    def ping_model(self, timeout: float, keep_alive: str | int | None = None) -> str:
+        """Tiny round-trip: ask the model to reply 'pong'. Returns the reply text."""
+        model = self.cfg.model
+        body = {"model": model, "stream": False,
+                "messages": [{"role": "user", "content": "Reply with exactly: pong"}],
+                "options": {"num_predict": 128, "temperature": 0.0, "num_ctx": 1024},
+                "think": "low" if model.startswith("gpt-oss") else False,
+                "keep_alive": keep_alive if keep_alive is not None else self.cfg.keep_alive_idle}
+        try:
+            with self._client(timeout) as c:
+                r = c.post("/api/chat", json=body)
+        except (httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout):
+            raise CuError(MODEL_TIMEOUT, f"{model} did not answer the ping within {timeout}s")
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            raise CuError(OLLAMA_UNREACHABLE, f"Ollama at {self.cfg.ollama_url} unreachable: {e}")
+        except httpx.HTTPError as e:
+            raise CuError(MODEL_FAILED, f"Ollama request failed: {e}")
+        if r.status_code == 404:
+            raise CuError(MODEL_NOT_FOUND, f"model '{model}' not found in Ollama at {self.cfg.ollama_url}")
+        if r.status_code >= 400:
+            raise CuError(MODEL_FAILED, f"Ollama HTTP {r.status_code}: {r.text[:200]}")
+        return str((r.json().get("message") or {}).get("content", "")).strip()
+
     def chat_json(self, system: str, user: str, timeout: float,
                   keep_alive: str | int | None = None) -> tuple[dict, dict]:
         """Returns (parsed_answer, stats). Raises CuError on any failure."""

@@ -26,4 +26,6 @@ session_active_minutes = 10
 min_free_mb = 2048
 memory_watch = true
 memory_watch_interval = 30
+autostart_ollama = true
+autostart_timeout = 10
 # system_prompt_file = "C:/Develop/mcp-computer-use/my_prompt.md"

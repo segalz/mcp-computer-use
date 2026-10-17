@@ -26,6 +26,17 @@ New session
 
 
 @pytest.fixture(autouse=True)
+def _no_real_ollama_spawn(monkeypatch):
+    from mcp_computer_use import autostart
+    def boom(*a, **k):
+        raise AssertionError("test tried to spawn a real ollama")
+    monkeypatch.setattr(autostart, "_spawn", boom)
+    autostart.state.update(autostarted=False, last=None)
+    yield
+    autostart.state.update(autostarted=False, last=None)
+
+
+@pytest.fixture(autouse=True)
 def _plenty_of_ram(monkeypatch):
     from mcp_computer_use import memory
     monkeypatch.setattr(memory, "free_ram_mb", lambda: 16000.0)

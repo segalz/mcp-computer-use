@@ -10,7 +10,7 @@ def test_tools_registered_read_only():
     mcp = server.build_server(Config())
     tools = asyncio.run(mcp.list_tools())
     names = sorted(t.name for t in tools)
-    assert names == ["health", "look_at_screen", "release_model"]  # no click/type tools
+    assert names == ["health", "look_at_screen", "ping", "release_model"]  # no click/type tools
 
 
 def test_health_http(monkeypatch):

@@ -13,6 +13,8 @@ from .guidance import question_hints
 from .extractors import extract, wants_snapshot
 from .sessions import Session, sanitize
 from . import memory
+from . import autostart
+from .errors import OLLAMA_UNREACHABLE
 from .ollama_client import OllamaClient
 from .timeouts import compute_timeout
 
@@ -147,18 +149,35 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
     # 3) local model summarises only the short text
     keep_alive, ka_reason = memory.keep_alive_for(cfg, session=session is not None, keep_warm=keep_warm)
     free_before = memory.free_ram_mb()
+    # Ollama availability: checked on calls without a session and on the FIRST call of a session only.
+    started = None
+    if session is None or session.is_new:
+        started = autostart.ensure_ollama(cfg, ollama)
     loaded = ollama.is_loaded()
     timeout = compute_timeout(len(ex.last_message), cfg, model_loaded=loaded)
+    user_msg = build_user_message(question, target, detected, ex.last_message, details,
+                                  changed if session and not session.is_new else None, previous)
     try:
-        answer, stats = ollama.chat_json(load_system_prompt(cfg),
-                                         build_user_message(question, target, detected, ex.last_message,
-                                                            details, changed if session and not session.is_new else None,
-                                                            previous),
-                                         timeout, keep_alive=keep_alive)
+        try:
+            answer, stats = ollama.chat_json(load_system_prompt(cfg), user_msg, timeout, keep_alive=keep_alive)
+        except CuError as e:
+            # mid-session (or check skipped): auto-start once and retry once
+            if e.code != OLLAMA_UNREACHABLE or started is not None:
+                raise
+            started = autostart.ensure_ollama(cfg, ollama)
+            if not started.get("reachable"):
+                raise
+            loaded = ollama.is_loaded()
+            timeout = compute_timeout(len(ex.last_message), cfg, model_loaded=loaded)
+            answer, stats = ollama.chat_json(load_system_prompt(cfg), user_msg, timeout, keep_alive=keep_alive)
     except CuError as e:
+        extra = {"ollama_autostart": started} if started and started.get("action") != "already_running" else {}
         return done(error_payload(e.code, e.message, windows_seen=[target], extracted=extracted,
-                                  model_used=cfg.model, timeout_seconds=timeout, duration_seconds=elapsed()))
+                                  model_used=cfg.model, timeout_seconds=timeout, duration_seconds=elapsed(), **extra))
     mem_info = {"keep_alive": keep_alive, "reason": ka_reason, "was_loaded": loaded}
+    if started and started.get("started"):
+        mem_info["ollama_autostarted"] = True
+        mem_info["ollama_start_seconds"] = started.get("seconds")
     memory_mb = ollama.model_memory_mb()
     free_after = memory.free_ram_mb()
     if memory.under_pressure(cfg, free_before) or memory.under_pressure(cfg, free_after):
@@ -212,6 +231,34 @@ def _result(target, status, summary, confidence, details, session, changed, cfg,
     return d
 
 
+def ping(cfg: Config, ollama: OllamaClient | None = None) -> dict:
+    """Heartbeat: server up, local Ollama reachable (auto-start), model answers 'pong'. No screen reading."""
+    t0 = time.monotonic()
+    ollama = ollama or OllamaClient(cfg)
+    out = {"ok": False, "server": True, "ollama": False, "model_reply_ok": False,
+           "model": cfg.model, "seconds": 0.0, "cold": False}
+    started = autostart.ensure_ollama(cfg, ollama)
+    if started.get("started"):
+        out["ollama_autostarted"] = True
+    if not started.get("reachable"):
+        out["error"] = f"Ollama at {cfg.ollama_url} unreachable (autostart: {started.get('action')})"
+        out["seconds"] = round(time.monotonic() - t0, 2)
+        return out
+    out["ollama"] = True
+    out["cold"] = not ollama.is_loaded()
+    timeout = cfg.timeout_base + (cfg.cold_load_extra if out["cold"] else 0)
+    try:
+        reply = ollama.ping_model(timeout, keep_alive=cfg.keep_alive_idle)
+        out["model_reply_ok"] = "pong" in reply.lower()
+        if not out["model_reply_ok"]:
+            out["error"] = f"unexpected model reply: {reply[:80]!r}"
+    except CuError as e:
+        out["error"] = f"{e.code}: {e.message}"
+    out["ok"] = out["model_reply_ok"]
+    out["seconds"] = round(time.monotonic() - t0, 2)
+    return out
+
+
 def release_model(cfg: Config, ollama: OllamaClient | None = None) -> dict:
     return memory.release(cfg, ollama or OllamaClient(cfg))
 
@@ -232,6 +279,10 @@ def health(cfg: Config, ollama: OllamaClient | None = None) -> dict:
         out["memory_mb"] = ollama.model_memory_mb()
     except CuError as e:
         out["problems"].append(e.message)
+    out["ollama_autostarted"] = autostart.state["autostarted"]
+    out["autostart_enabled"] = bool(cfg.autostart_ollama and autostart.target(cfg))
+    if autostart.state["last"]:
+        out["last_autostart"] = autostart.state["last"]
     free = memory.free_ram_mb()
     current, reason = memory.keep_alive_for(cfg)
     out["memory"] = {"free_ram_mb": free, "min_free_mb": cfg.min_free_mb,

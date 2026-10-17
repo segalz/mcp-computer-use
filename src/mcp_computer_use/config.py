@@ -44,6 +44,8 @@ class Config:
     min_free_mb: int = 2048          # free RAM below this -> unload right after answering (0 = off)
     memory_watch: bool = True        # background thread unloads under memory pressure
     memory_watch_interval: float = 30.0
+    autostart_ollama: bool = True    # start a local `ollama serve` when the localhost URL is unreachable
+    autostart_timeout: float = 10.0  # seconds to wait for /api/tags after starting
     stateless_hint_window: float = 900.0  # seconds; repeated calls without session_id get a hint
 
 

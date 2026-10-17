@@ -14,6 +14,8 @@ How to call it:
 - For multi-part checks call several times, step by step: first the status, then the details. Do not pack several questions into one call.
 - Optional context: pass `client` (your name, e.g. "codex", "claude") and a `session_id` you choose (e.g. "fix-ui"), and reuse them on every call of the same task. The server then keeps a small context file between calls: answers get shorter and more accurate, and `changed_since_last` tells you what changed since your previous call. Sending a NEW session_id replaces (deletes) your previous one for that client. Without them every call is independent: the full screen is re-read, "what changed" is not possible, and no file is written.
 - `details` (filled by code, not the model) may hold project, session, branch, folder, next_step, failures, files, background_tasks; use it directly instead of asking again.
+- To check the bridge works before a task, call ping() (the first ping can take 30-50 s while the model loads).
+- If the local Ollama is down, the server starts it automatically (checked on calls without a session and on the first call of a session).
 - Memory: the local model stays loaded 3 min after a single call and 10 min while a session is active (or with keep_warm=true), and is unloaded early if free RAM gets low. When your task is done, call release_model() to free the memory right away.
 - It cannot click, type or change anything. Never ask it to.
 - If the result has `error`, follow `error.suggestion`: on OLLAMA_UNREACHABLE call health() first; on MODEL_TIMEOUT retry once; on APP_NOT_FOUND retry with an `app` from `available_apps`; on QUESTION_TOO_LONG split the question. `extracted` holds the short raw text you can still use.
@@ -32,6 +34,12 @@ between calls (more accurate, shorter answers, plus `changed_since_last`). Reuse
 task; sending a new session_id replaces the old one for that client.
 `keep_warm` (optional bool) keeps the model loaded 10 min instead of 3 when you will ask again soon.
 Call release_model() when your task is done."""
+
+PING_DESCRIPTION = """\
+Heartbeat: checks that this bridge works end to end. Confirms the server is up, makes sure the local
+Ollama is reachable (auto-starts it if needed) and asks the model for 'pong'. No screen reading.
+Returns {ok, server, ollama, model_reply_ok, model, seconds, cold, error?}.
+The first ping may take 30-50 s if the model is cold (not loaded); later pings take a few seconds."""
 
 RELEASE_DESCRIPTION = """\
 Unload the local model now and return freed memory_mb. Call it at the end of your task (after your last
