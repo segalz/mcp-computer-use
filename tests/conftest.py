@@ -25,15 +25,25 @@ New session
 """
 
 
+@pytest.fixture(autouse=True)
+def _reset_stateless_hint():
+    from mcp_computer_use import core
+    core._stateless_calls.clear()
+    yield
+    core._stateless_calls.clear()
+
+
 @pytest.fixture
-def cfg():
-    return Config(ollama_url="http://ollama.test:11435", model="gpt-oss:20b")
+def cfg(tmp_path):
+    return Config(ollama_url="http://ollama.test:11435", model="gpt-oss:20b",
+                  sessions_dir=str(tmp_path / ".sessions"))
 
 
 class FakeAgentCu:
     """Mocks subprocess.run for agent-cu."""
 
-    def __init__(self, apps=None, texts=None, fail=None):
+    def __init__(self, apps=None, texts=None, fail=None, snaps=None):
+        self.snaps = snaps or {}
         self.apps = apps if apps is not None else [{"name": "Claude", "frontmost": False},
                                                    {"name": "ChatGPT", "frontmost": True}]
         self.texts = texts or {"Claude": CLAUDE_TEXT, "ChatGPT": "Codex\nhello"}
@@ -54,6 +64,11 @@ class FakeAgentCu:
             if app not in self.texts:
                 return subprocess.CompletedProcess(args, 1, "", f"App not found: {app}")
             return subprocess.CompletedProcess(args, 0, self.texts[app], "")
+        if sub == "snapshot":
+            app = args[3]
+            if app not in self.snaps:
+                return subprocess.CompletedProcess(args, 1, "", "snapshot unavailable")
+            return subprocess.CompletedProcess(args, 0, self.snaps[app], "")
         raise AssertionError(f"unexpected agent-cu call {args}")
 
 

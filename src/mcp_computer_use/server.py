@@ -18,7 +18,7 @@ from pydantic import Field
 
 from . import core
 from .guidance import (INSTRUCTIONS, LOOK_DESCRIPTION, HEALTH_DESCRIPTION,
-                       QUESTION_DESCRIPTION, APP_DESCRIPTION)
+                       QUESTION_DESCRIPTION, APP_DESCRIPTION, CLIENT_DESCRIPTION, SESSION_DESCRIPTION)
 from .config import Config, load_config
 
 
@@ -30,8 +30,10 @@ def build_server(cfg: Config) -> _Server:
     def look_at_screen(
         question: Annotated[str, Field(description=QUESTION_DESCRIPTION)],
         app: Annotated[str | None, Field(description=APP_DESCRIPTION)] = None,
+        client: Annotated[str | None, Field(description=CLIENT_DESCRIPTION)] = None,
+        session_id: Annotated[str | None, Field(description=SESSION_DESCRIPTION)] = None,
     ) -> dict:
-        return core.look_at_screen(question, app, cfg)
+        return core.look_at_screen(question, app, cfg, client=client, session_id=session_id)
 
     @mcp.tool(description=HEALTH_DESCRIPTION)
     def health() -> dict:
@@ -68,6 +70,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--health", action="store_true", help="print health JSON and exit")
     p.add_argument("--ask", metavar="QUESTION", help="run look_at_screen once and print JSON")
     p.add_argument("--app", help="app for --ask")
+    p.add_argument("--client", help="optional client name for --ask")
+    p.add_argument("--session-id", help="optional session id for --ask (keeps context between runs)")
     p.add_argument("--health-http", action="store_true", help="also serve GET /health over HTTP")
     a = p.parse_args(argv)
     cfg = load_config(a.config)
@@ -82,7 +86,7 @@ def main(argv: list[str] | None = None) -> None:
     if a.health:
         return out(core.health(cfg))
     if a.ask:
-        return out(core.look_at_screen(a.ask, a.app, cfg))
+        return out(core.look_at_screen(a.ask, a.app, cfg, client=a.client, session_id=a.session_id))
     if cfg.health_http:
         start_health_http(cfg)
     build_server(cfg).run("stdio")

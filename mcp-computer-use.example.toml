@@ -17,4 +17,7 @@ cold_load_extra = 45
 health_http = false
 health_host = "127.0.0.1"
 health_port = 8765
+snapshot_details = true
+# sessions_dir = "C:/developer/mcp-computer-use/.sessions"
+session_ttl_hours = 24
 # system_prompt_file = "C:/developer/mcp-computer-use/my_prompt.md"

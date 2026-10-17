@@ -1,0 +1,54 @@
+window "Claude"
+  group "Claude"
+    group
+      group
+        [@e1] button "Minimise"
+        group
+          group
+            [@e5] textarea "Multimodal work in progress - Claude Code" val="https://claude.ai/epitaxy/local_77dba4e8…" id=RootWebArea
+              group
+                group id=root
+                  [@e6] button "Menu"
+                  group
+                    [@e10] button "Multimodal work in progress, rename session" id=_r_132_
+                    [@e12] button "Hide session rail" val="checked" id=_r_c6l_
+                  group
+                    group "Primary pane"
+                      group
+                        statictext "Claude finished the response"
+                        group "Chat messages"
+                          group "Message 72"
+                            statictext "You said: make the dialog wider so long model names are not cut"
+                            toolbar "Message actions"
+                              [@e21] button "Copy" id=_r_bqn_
+                          statictext "What used to be “Nvidia/A...” now shows as "Nvidia/Active Speaker Detection" in full."
+                          group
+                            group
+                              statictext "Finished a background command (1 failed)"
+                              [@e30] button "Finished a background command (1 failed), ran 3 commands"
+                          statictext "גרסת התקנה חדשה:"
+                          [@e34] button "JoinAIForce QUAL_0.1.0_x64-setup.exe"
+                          statictext ", מ־16:08. אחרי ההתקנה אפשר לפתוח אותו מחדש."
+                          [@e36] button "Compact session"
+                      group "Session details"
+                        group "Environment"
+                          statictext "Environment" id=_r_c3g_
+                            [@e45] button "Environment"
+                          [@e46] button "Reorder Environment"
+                          group id=_r_c3n_
+                            group id=_r_c3q_
+                              statictext "JoinAIForce-Desktop"
+                          [@e47] button "JoinAIForce-Desktop" id=_r_c3v_
+                          group id=_r_c44_
+                            group "C:\Develop"
+                              statictext "C:\"
+                              statictext "Develop"
+                          [@e48] button "fix/pre-api" id=_r_c4a_
+                          [@e49] button "Remote Control" val="unchecked" id=base-ui-_r_c4g_
+                        group "Context"
+                          statictext "93% used"
+                        group "Background tasks 1 running"
+                          statictext "Background tasks 1 running" id=_r_c5v_
+                      group
+                        [@e69] button "Model: Opus 5.5 Medium" id=base-ui-_r_u5_
+                        [@e70] button "Usage: 37% of session limit, Resets in 1 hr 13 min" id=_r_tb_

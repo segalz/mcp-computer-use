@@ -112,3 +112,8 @@ def find_app(apps: list[AppInfo], requested: str) -> AppInfo | None:
 
 def window_text(app: str, cmd: str = "agent-cu", timeout: float = 20.0) -> str:
     return run(["text", "-a", app], cmd, timeout)
+
+
+def window_snapshot(app: str, cmd: str = "agent-cu", timeout: float = 20.0) -> str:
+    """Accessibility tree (interactive + compact, human format). Used only for extra details."""
+    return run(["snapshot", "-a", app, "-i", "-c", "--human"], cmd, timeout)

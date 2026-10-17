@@ -35,6 +35,10 @@ class Config:
     health_host: str = "127.0.0.1"
     health_port: int = 8765
     system_prompt_file: str = ""    # optional override of the bundled prompt
+    snapshot_details: bool = True   # extra `agent-cu snapshot` for project/session/branch (Claude)
+    sessions_dir: str = ""          # default: <project>/.sessions (or ~/.mcp-computer-use/sessions)
+    session_ttl_hours: float = 24.0  # session files not updated for longer are deleted
+    stateless_hint_window: float = 900.0  # seconds; repeated calls without session_id get a hint
 
 
 # Short env aliases requested for convenience (in addition to MCP_CU_<FIELD>).

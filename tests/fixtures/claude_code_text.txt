@@ -1,0 +1,49 @@
+file:///C:/Program%20Files/WindowsApps/Claude_2.37337.1.0_x64__pzs8sxrjxfjjc/app/resources/app.asar/.vite/renderer/main_window/index.html
+https://claude.ai/epitaxy/local_77dba4e8-4ac0-4bd5-b0c7-cd2677338250
+checked
+unchecked
+unchecked
+Claude finished the response
+Use the up and down arrow keys to move between messages.
+You said: make the dialog wider so long model names are not cut
+make the dialog wider so long model names are not cut
+The dialog is wider, and each row shows the full name with the model ID below it. Checking a very long name from your screenshot:
+Clicked, typed, waited +1
+Clicked, typed, waited +1
+What used to be "Nvidia/A..." now shows in full. The dialog is fixed.
+Used agent-intern: Ask Antigravity (new conversation)
+Done. The app updates by itself on interface changes. Checking the menu:
+Clicked, waited, zoomed in
+The full name shows, wrapped onto two lines. Wrapping up: tests, commit, push and installer.
+Finished a background command (1 failed)
+, ran 3 commands
+Finished a background command (1 failed), ran 3 commands
+תוקן. שמות מודלים ארוכים מוצגים עכשיו במלואם, וזה נבדק בתוכנה עצמה.
+הקוד:
+ כל 1016 בדיקות הממשק והבנייה לייצור עוברות. הקוד נמצא בקומיט 
+ddb86ca
+, שנדחף לשרת.
+גרסת התקנה חדשה:
+ 
+, מ־16:08. סגרתי את ה־QUAL הפתוח שלך לצורך הבדיקה, ושום דבר לא אבד. אחרי ההתקנה אפשר לפתוח אותו מחדש.
+unchecked
+How is Claude doing this session?
+Environment
+JoinAIForce-Desktop
+C:\
+Develop
+unchecked
+Context
+93% used
+926.7k / 1M
+Messages
+852k
+40k until auto-compact
+Connectors 21 to reconnect
+Changes
+Background tasks 1 running
+Chat mode
+unchecked
+Opus 5.5
+Medium
+Fast mode off
