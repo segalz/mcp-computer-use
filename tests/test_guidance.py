@@ -120,3 +120,38 @@ def test_click_schema_requires_only_app_and_lists_steps():
     assert schema["required"] == ["app"]
     assert "steps" in schema["properties"]
     assert schema["properties"]["target"]["default"] is None
+
+
+def test_guidance_length_limits_and_consistency():
+    from mcp_computer_use import guidance
+
+    # Tool descriptions <= ~900 chars; INSTRUCTIONS <= ~2500 chars
+    assert len(guidance.INSTRUCTIONS) <= 2500, f"INSTRUCTIONS too long: {len(guidance.INSTRUCTIONS)}"
+    for desc, name in [
+        (guidance.LOOK_DESCRIPTION, "look_at_screen"),
+        (guidance.CLICK_DESCRIPTION, "click"),
+        (guidance.TYPE_DESCRIPTION, "type_text"),
+        (guidance.PING_DESCRIPTION, "ping"),
+        (guidance.RELEASE_DESCRIPTION, "release_model"),
+        (guidance.HEALTH_DESCRIPTION, "health"),
+    ]:
+        assert len(desc) <= 900, f"{name} description too long: {len(desc)}"
+
+    # INSTRUCTIONS mentions key tools, image option, and safety confirmation rule
+    assert "click" in guidance.INSTRUCTIONS
+    assert "type_text" in guidance.INSTRUCTIONS
+    assert "include_image" in guidance.INSTRUCTIONS
+    assert "You MUST ask the human user and get explicit approval before setting confirm_dangerous=true" in guidance.INSTRUCTIONS
+
+    # Bench insight and per-app details keys mentioned in INSTRUCTIONS
+    assert "bridge pays off" in guidance.INSTRUCTIONS
+    assert "Claude Code" in guidance.INSTRUCTIONS
+    assert "Codex desktop" in guidance.INSTRUCTIONS
+
+
+def test_readme_snippet_matches_agents_snippet():
+    from pathlib import Path
+    agents_snippet = Path("docs/AGENTS_SNIPPET.md").read_text(encoding="utf-8").strip()
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert agents_snippet in readme
+

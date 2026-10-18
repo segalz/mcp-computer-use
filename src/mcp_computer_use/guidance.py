@@ -7,35 +7,31 @@ import unicodedata
 INSTRUCTIONS = """\
 mcp-computer-use: look_at_screen is a READ-ONLY screen reader. A local model reads one window on this computer and returns a short JSON answer, so you never pay for the raw window text.
 
-How to call it:
-- Always write `question` in English, even if the user speaks another language (translate it yourself).
-- One short, focused, single-purpose question per call (max ~300 chars), e.g. "Is Claude working or finished?" or "What is Claude's last message about?".
-- Pass `app` when you know it (e.g. "Claude", "ChatGPT"); otherwise the app named in the question or the frontmost app is used.
-- For multi-part checks call several times, step by step: first the status, then the details. Do not pack several questions into one call.
-- Optional context: pass `client` (your name, e.g. "codex", "claude") and a `session_id` you choose (e.g. "fix-ui"), and reuse them on every call of the same task. The server then keeps a small context file between calls: answers get shorter and more accurate, and `changed_since_last` tells you what changed since your previous call. Sending a NEW session_id replaces (deletes) your previous one for that client. Without them every call is independent: the full screen is re-read, "what changed" is not possible, and no file is written.
-- `details` (filled by code, not the model) may hold project, session, branch, folder, next_step, failures, files, background_tasks; use it directly instead of asking again.
-- To check the bridge works before a task, call ping() (the first ping can take 30-50 s while the model loads).
-- If the local Ollama is down, the server starts it automatically (checked on calls without a session and on the first call of a session).
-- Memory: the local model stays loaded 3 min after a single call and 10 min while a session is active (or with keep_warm=true), and is unloaded early if free RAM gets low. When your task is done, call release_model() to free the memory right away.
-- Use click(app, target) or type_text(app, target, text) for app-scoped actions. Pass the visible label, not a ref; refs change between snapshots. Prefer one click per call when exploring; use click(app, steps=[...]) for a known sequence of up to 10 labels, such as calculator keys. Every step has a safety gate and a fresh snapshot; failure stops the batch. Read with look_at_screen first if unsure.
-- Dangerous actions require human approval: You MUST ask the human user and get explicit approval before setting confirm_dangerous=true. Actions only log client/session_id; they do not create context sessions.
-- If the result has `error`, follow `error.suggestion`: on OLLAMA_UNREACHABLE call health() first; on MODEL_TIMEOUT retry once; on APP_NOT_FOUND retry with an `app` from `available_apps`; on QUESTION_TOO_LONG split the question. `extracted` holds the short raw text you can still use.
-- A `hint` field is advice for your next call; the answer is still valid.
+When to use each tool:
+- READ with look_at_screen: inspect window state, verify actions, or read text. For small/simple windows a direct read can be as cheap as the bridge; the bridge pays off on large, busy windows (chat apps, IDEs) and when `details` fields answer directly.
+- Window IMAGE with include_image=true: request only when text is not enough (layout, charts, visual glitches); images cost thousands of tokens.
+- ACT with click(app, target) or type_text(app, target, text): interact with visible UI labels (never @eN refs). Use steps=[...] for a known sequence of up to 10 labels. Read with look_at_screen first if unsure.
+- SAFETY: Dangerous actions (Delete, Send, Pay, מחק, שלח, etc.) require human approval. You MUST ask the human user and get explicit approval before setting confirm_dangerous=true.
+
+How to call look_at_screen:
+- Write `question` in English (translate user input if needed). One short, focused question per call (max 300 chars).
+- Pass `app` when known (e.g. "Claude", "ChatGPT", "מחשבון"); otherwise frontmost window is used.
+- For multi-part checks call step by step: status first, then details.
+- `details` is extracted by code for Claude Code, Codex desktop (ChatGPT), editors, and browsers (project, session, branch, next_step, failures, files, url); use it directly instead of asking again.
+- Context across calls: pass `client` (e.g. "codex") and `session_id` (e.g. "task-1") to get `changed_since_last` and shorter answers. Omit them for independent calls.
+- Memory: model stays loaded 3 min (single call) or 10 min (session or keep_warm=true). Call release_model() when your task is done.
+- Health: call ping() to verify the bridge. If Ollama is down the server auto-starts it. On error follow error.suggestion (on OLLAMA_UNREACHABLE call health() first; on MODEL_TIMEOUT retry once).
 """
 
 LOOK_DESCRIPTION = """\
-Ask ONE short English question about what a window on this computer shows; get short JSON back
-(windows_seen, status, summary, confidence, details, model_used, duration_seconds, memory_mb).
-`details` is filled by code: project, session, branch, next_step, failures, files, background_tasks when found.
-Read-only: never clicks or types. Pass `app` when known. For multi-part checks call step by step
-(status first, then details). On `error`, follow `error.suggestion`.
-`include_image` (optional bool): also return a window JPEG (images cost thousands of tokens; request only when text is not enough).
-`client` and `session_id` are OPTIONAL. Without them every call is independent: the full screen is
-re-read, no 'what changed' is possible and no file is written. With them the server keeps context
-between calls (more accurate, shorter answers, plus `changed_since_last`). Reuse the same pair for one
-task; sending a new session_id replaces the old one for that client.
-`keep_warm` (optional bool) keeps the model loaded 10 min instead of 3 when you will ask again soon.
-Call release_model() when your task is done."""
+Ask ONE short English question about what a window shows; get short JSON back
+(status, summary, details, windows_seen, confidence, duration_seconds, memory_mb).
+Read-only: never clicks/types. Pass `app` when known. Call step by step for multi-part checks.
+`details` is filled by code: project, session, branch, next_step, failures, files.
+`include_image`: optional JPEG (images cost thousands of tokens; request only when text is not enough).
+`client` and `session_id` are OPTIONAL: without them each call is independent and no file is written; with them context is kept between calls (`changed_since_last`). A new session_id replaces the old one.
+`keep_warm`: keep model loaded 10 min instead of 3 when asking soon.
+Follow `error.suggestion` on error. Call release_model() when done."""
 
 PING_DESCRIPTION = """\
 Heartbeat: checks that this bridge works end to end. Confirms the server is up, makes sure the local

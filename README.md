@@ -22,6 +22,9 @@ This server does the reading **locally**:
 
 `qwen3:4b` was tested and kept emitting reasoning, so `gpt-oss:20b` is the default (configurable).
 
+> [!NOTE]
+> **Bench insight (measured 2026-10-18)**: For small or simple windows (e.g. a calculator or a short webpage) a direct read with `agent-cu text` can be as cheap in tokens as the bridge (~1k–2k tokens). The bridge pays off on large, busy windows (chat apps, IDEs) where raw text runs 40k–200k+ tokens, and whenever pre-extracted `details` answer the question directly.
+
 ## Tools
 | Tool | Description |
 |---|---|
@@ -382,7 +385,7 @@ To see what is on screen or interact with app windows (e.g. "is Claude finished?
 - **CLI fallback**: Do not use `agent-cu` directly to click or type unless the tool fails.
 
 ### General
-- To launch an app, run `powershell -ExecutionPolicy Bypass -File C:\Develop\mcp-computer-use\scripts\cu-open.ps1 <exe|path|uri>` instead of `agent-cu open`, then use the returned `app` window title (e.g. `מחשבון`).
+- To launch an app, run `powershell -ExecutionPolicy Bypass -File <repo>\scripts\cu-open.ps1 <exe|path|uri>` instead of `agent-cu open`, then use the returned `app` window title (e.g. `מחשבון`).
 - Before a task, call `ping()` to verify the bridge. When done, call `release_model()` to free RAM.
 - Follow `error.suggestion` on errors. Apply any returned `hint` on your next call.
 ```
@@ -394,7 +397,7 @@ To see what is on screen or interact with app windows (e.g. "is Claude finished?
 `calculator:` URIs), polls the open windows every 500 ms until a new window appears (or an existing
 single-instance window comes to the front), checks that `agent-cu snapshot -a <app>` works, and prints one JSON line:
 ```powershell
-powershell -ExecutionPolicy Bypass -File C:\Develop\mcp-computer-use\scripts\cu-open.ps1 calc.exe
+powershell -ExecutionPolicy Bypass -File <repo>\scripts\cu-open.ps1 calc.exe
 # {"ok":true,"app":"מחשבון","title":"מחשבון","process":"ApplicationFrameHost","pid":16708,"seconds":1.8,"hint":"UWP app hosted by ApplicationFrameHost: use -a 'מחשבון' (the window title).","verified":true}
 agent-cu snapshot -a 'מחשבון' -i -c --human
 ```
@@ -445,6 +448,9 @@ MIT
 4. הסוכן מקבל כ-50 טוקנים של JSON.
 
 נבדק גם `qwen3:4b`, אבל הוא ממשיך "לחשוב בקול", ולכן ברירת המחדל היא `gpt-oss:20b`. אפשר לשנות אותה.
+
+> [!NOTE]
+> **תובנת ביצועים ומדידה (18.10.2026)**: עבור חלונות קטנים או פשוטים (כגון מחשבון או עמוד אינטרנט קצר), קריאה ישירה של חלון באמצעות `agent-cu text` יכולה להיות זולה בטוקנים באותה מידה (~1,000–2,000 טוקנים). היתרון המשמעותי של השרת בא לידי ביטוי בחלונות גדולים ועמוסים (תוכנות צ'אט, עורכי קוד ו-IDEs), שבהם טקסט גולמי מגיע ל-40k עד 200k+ טוקנים, וכן כאשר שדות ה-`details` שנשלפים אוטומטית עונים ישירות על השאלה ללא צורך בניתוח חוזר של המודל.
 
 ## הכלים
 | כלי | תיאור |
@@ -727,7 +733,7 @@ mcp-computer-use --ask "Is Claude finished?" --app Claude
 הפקודה `agent-cu open calc.exe --wait` פותחת את המחשבון, אבל נכשלת בזמן קצוב: היא מחכה לתוכנה בשם `calc.exe`, בזמן שתוכנות UWP רצות בתוך `ApplicationFrameHost` עם כותרת מתורגמת (למשל `מחשבון`).
 הסקריפט `cu-open.ps1` פותח כל מה ש-`Start-Process` יודע לפתוח: שם קובץ, נתיב מלא, או כתובות כמו `ms-settings:` ו-`calculator:`. כל חצי שנייה הוא בודק אם נפתח חלון חדש (או אם חלון קיים של תוכנה שרצה במופע יחיד עבר לחזית), מוודא ש-`agent-cu snapshot -a <app>` עובד, ומדפיס שורת JSON אחת עם `ok`, ‏`app` (השם לשימוש ב-`agent-cu -a`), ‏`title`, ‏`process`, ‏`pid`, ‏`seconds` ו-`hint`.
 ```powershell
-powershell -ExecutionPolicy Bypass -File C:\Develop\mcp-computer-use\scripts\cu-open.ps1 calc.exe
+powershell -ExecutionPolicy Bypass -File <repo>\scripts\cu-open.ps1 calc.exe
 ```
 אפשרויות: `-Args '<ארגומנטים>'` (עם `-File` מעבירים כמה ארגומנטים כמחרוזת אחת במרכאות), ‏`-TimeoutSec 15`, ו-`-NoVerify` לדילוג על הבדיקה. אם לא נפתח חלון בזמן, מוחזר `ok:false` עם הסבר, החלונות החדשים שנראו והחלון שבחזית. הסקריפט לא סוגר ולא מזיז חלונות אחרים, והפלט ב-UTF-8 כך שכותרות בעברית נשמרות.
 סוכנים צריכים לפתוח תוכנות תמיד דרך `cu-open.ps1` ולא דרך `agent-cu open`.

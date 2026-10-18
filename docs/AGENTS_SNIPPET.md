@@ -18,6 +18,6 @@ To see what is on screen or interact with app windows (e.g. "is Claude finished?
 - **CLI fallback**: Do not use `agent-cu` directly to click or type unless the tool fails.
 
 ### General
-- To launch an app, run `powershell -ExecutionPolicy Bypass -File C:\Develop\mcp-computer-use\scripts\cu-open.ps1 <exe|path|uri>` instead of `agent-cu open`, then use the returned `app` window title (e.g. `מחשבון`).
+- To launch an app, run `powershell -ExecutionPolicy Bypass -File <repo>\scripts\cu-open.ps1 <exe|path|uri>` instead of `agent-cu open`, then use the returned `app` window title (e.g. `מחשבון`).
 - Before a task, call `ping()` to verify the bridge. When done, call `release_model()` to free RAM.
 - Follow `error.suggestion` on errors. Apply any returned `hint` on your next call.
