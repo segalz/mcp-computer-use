@@ -8,6 +8,7 @@ Test fixtures representing Chromium-based browsers (Google Chrome, Microsoft Edg
 - **`chrome_dashboard_snapshot.txt`**: Derived from `plan/raw-captures/chrome_snapshot_full.txt`.
 - **`chrome_dashboard_interactive.txt`**: Derived from `plan/raw-captures/chrome_snapshot_dashboard.txt` (interactive-only capture).
 - **`chrome_dashboard_text.txt`**: Derived from `plan/raw-captures/chrome_text_dashboard.txt`.
+  Real `agent-cu text` output omits list item names (the `test_parse_*` lines), so browser page content comes from the full non `-i` snapshot.
 
 ### Edge Network Error
 - **`edge_error_snapshot.txt`**: Derived from `plan/raw-captures/edge_snapshot_example.txt`.

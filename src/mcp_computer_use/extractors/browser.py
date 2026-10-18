@@ -58,6 +58,11 @@ _CHROME_WORDS = {
     "sync your profile", "tab bar", "tabgroup",
 }
 
+# Roles whose labels are page text (document order); list items are omitted by `agent-cu text`.
+_TEXT_ROLES = {"statictext", "link", "listitem", "treeitem", "cell"}
+# Browser pages list every failing item (e.g. tests), so keep more than the default 3.
+_FAILURE_LIMIT = 6
+
 _URL_PATTERN = re.compile(r"^(?:https?://|file:///|edge://|chrome://|about:|[a-zA-Z]:[/\\])", re.I)
 _MEMORY_USAGE_TAB = re.compile(r"-\s*Memory usage\s*-\s*[\d.]+\s*[KMGT]?B", re.I)
 _BOOKMARK_ITEM = re.compile(r"^(?:Example bookmark|Bookmark)\b", re.I)
@@ -139,6 +144,16 @@ def _find_web_area_nodes(snapshot: str) -> list[tuple[int, str, str]]:
             break
         web_nodes.append((nodes_with_meta[i][0], nodes_with_meta[i][1], nodes_with_meta[i][2]))
     return web_nodes
+
+
+def _web_text_lines(nodes: list[tuple[int, str, str]]) -> list[str]:
+    """Page text labels in document order; only adjacent duplicates (e.g. a child repeating its parent) are dropped."""
+    out: list[str] = []
+    for _, role, label in nodes:
+        clean = label.strip()
+        if role in _TEXT_ROLES and clean and not (out and out[-1] == clean):
+            out.append(clean)
+    return out
 
 
 def _is_browser_chrome_line(line: str) -> bool:
@@ -239,8 +254,8 @@ def browser_snapshot_details(snapshot: str) -> dict:
         headings = _extract_headings_from_nodes(web_nodes)
         if headings:
             details["headings"] = headings
-        body_lines = [label.strip() for _, role, label in web_nodes if role in {"statictext", "link"} and label.strip()]
-        failures = find_failures(body_lines)
+        body_lines = _web_text_lines(web_nodes)
+        failures = find_failures(body_lines, limit=_FAILURE_LIMIT)
         if failures:
             details["failures"] = failures
         next_step = find_next_step(body_lines)
@@ -275,7 +290,7 @@ def extract_browser(text: str | list[str], app: str, max_chars: int = 2000,
     # Determine page content: prefer snapshot web area over flattened text
     web_nodes = _find_web_area_nodes(snapshot) if isinstance(snapshot, str) and snapshot.strip() else []
     if web_nodes:
-        page_lines = [label.strip() for _, role, label in web_nodes if role in {"statictext", "link"} and label.strip()]
+        page_lines = _web_text_lines(web_nodes)
     else:
         # In text-only mode or when no web area is present in snapshot, filter out chrome lines
         page_lines = _filter_text_lines(lines)
@@ -286,7 +301,7 @@ def extract_browser(text: str | list[str], app: str, max_chars: int = 2000,
             details["headings"] = headings
 
     if "failures" not in details and page_lines:
-        failures = find_failures(page_lines)
+        failures = find_failures(page_lines, limit=_FAILURE_LIMIT)
         if failures:
             details["failures"] = failures
 

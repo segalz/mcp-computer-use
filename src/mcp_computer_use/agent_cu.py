@@ -158,9 +158,14 @@ def window_text(app: str, cmd: str = "agent-cu", timeout: float = 20.0) -> str:
     return run(["text", "-a", app], cmd, timeout)
 
 
-def window_snapshot(app: str, cmd: str = "agent-cu", timeout: float = 20.0) -> str:
-    """Accessibility tree (interactive + compact, human format). Used only for extra details."""
-    return run(["snapshot", "-a", app, "-i", "-c", "--human"], cmd, timeout)
+def window_snapshot(app: str, cmd: str = "agent-cu", timeout: float = 20.0,
+                    interactive: bool = True) -> str:
+    """Accessibility tree (compact, human format). Used only for extra details.
+
+    interactive=False keeps non-interactive nodes (e.g. a browser's web area text and list items).
+    """
+    flags = ["-i", "-c"] if interactive else ["-c"]
+    return run(["snapshot", "-a", app, *flags, "--human"], cmd, timeout)
 
 
 @dataclass

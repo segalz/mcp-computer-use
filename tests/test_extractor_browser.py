@@ -304,3 +304,79 @@ def test_snapshot_web_area_preferred_over_flattened_text():
     assert "Noisy line" not in res.last_message
     assert "Build dashboard" in res.last_message
     assert "Latest run #42" in res.last_message
+
+
+# -----------------------------------------------------------------------------
+# List items: `agent-cu text` omits them, so they must come from the full snapshot
+# -----------------------------------------------------------------------------
+
+def test_chrome_snapshot_list_items_reach_message_and_failures():
+    res = extract_browser("", "Google Chrome", snapshot=fixture("chrome_dashboard_snapshot.txt"))
+    msg = res.last_message
+    assert "test_parse_unicode - failed" in msg and "test_parse_large - failed" in msg
+    assert "test_parse_empty - passed" in msg
+    assert msg.index("Error: 2 tests failed") < msg.index("test_parse_empty") < msg.index("test_parse_large")
+    fails = res.details["failures"]
+    assert "test_parse_unicode - failed" in fails and "test_parse_large - failed" in fails
+    assert "Error: 2 tests failed in parser_test.py" in fails
+    assert not any("test_parse_empty" in f for f in fails)
+    assert "Tab search" not in msg and "New tab" not in msg
+
+
+def test_chrome_text_plus_snapshot_includes_list_items():
+    from mcp_computer_use.extractors import extract
+    text = fixture("chrome_dashboard_text.txt")
+    assert "test_parse_" not in text  # real `agent-cu text` output omits list items
+    ex = extract(text, "Google Chrome", snapshot=fixture("chrome_dashboard_snapshot.txt"))
+    assert ex.extractor == "browser"
+    assert "test_parse_unicode - failed" in ex.last_message
+    assert "test_parse_large - failed" in ex.details["failures"]
+
+
+def test_core_uses_full_snapshot_for_browser_and_interactive_otherwise(cfg, fake_cu):
+    from conftest import make_ollama
+    from mcp_computer_use import core
+    fake_cu.texts["Google Chrome"] = fixture("chrome_dashboard_text.txt")
+    fake_cu.snaps["Google Chrome"] = fixture("chrome_dashboard_snapshot.txt")
+    sent = []
+    res = core.look_at_screen("Which tests failed?", "Google Chrome", cfg, make_ollama(cfg, record=sent))
+    assert ["snapshot", "-a", "Google Chrome", "-c", "--human"] in fake_cu.calls
+    assert not any(c[:1] == ["snapshot"] and "-i" in c for c in fake_cu.calls)
+    assert "test_parse_large - failed" in res["details"]["failures"]
+    assert "test_parse_unicode - failed" in sent[0]["messages"][1]["content"]
+
+    fake_cu.calls.clear()
+    fake_cu.texts["Claude"] = "hello"
+    fake_cu.snaps["Claude"] = '  [@e1] button "OK"'
+    core.look_at_screen("What is shown?", "Claude", cfg, make_ollama(cfg))
+    assert ["snapshot", "-a", "Claude", "-i", "-c", "--human"] in fake_cu.calls
+
+
+def test_core_browser_snapshot_failure_is_not_fatal(cfg, fake_cu):
+    from conftest import make_ollama
+    from mcp_computer_use import core
+    fake_cu.texts["Google Chrome"] = fixture("chrome_dashboard_text.txt")  # no snapshot -> exit 1
+    res = core.look_at_screen("What failed?", "Google Chrome", cfg, make_ollama(cfg))
+    assert "error" not in res
+    assert any("2 tests failed" in f for f in res["details"]["failures"])
+
+
+def test_core_browser_full_snapshot_gets_double_timeout(cfg, fake_cu, monkeypatch):
+    from conftest import make_ollama
+    from mcp_computer_use import agent_cu, core
+    seen = {}
+    real = agent_cu.window_snapshot
+
+    def spy(app, cmd="agent-cu", timeout=20.0, **kw):
+        seen[app] = timeout
+        return real(app, cmd, timeout, **kw)
+
+    monkeypatch.setattr(agent_cu, "window_snapshot", spy)
+    fake_cu.texts["Google Chrome"] = fixture("chrome_dashboard_text.txt")
+    fake_cu.snaps["Google Chrome"] = fixture("chrome_dashboard_snapshot.txt")
+    fake_cu.texts["Claude"] = "hello"
+    fake_cu.snaps["Claude"] = '  [@e1] button "OK"'
+    core.look_at_screen("Which tests failed?", "Google Chrome", cfg, make_ollama(cfg))
+    core.look_at_screen("What is shown?", "Claude", cfg, make_ollama(cfg))
+    assert seen["Google Chrome"] == cfg.agent_cu_timeout * 2
+    assert seen["Claude"] == cfg.agent_cu_timeout

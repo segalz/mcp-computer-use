@@ -12,7 +12,7 @@ from . import errors as action_errors
 from .config import Config
 from .errors import CuError, APP_NOT_FOUND, QUESTION_TOO_LONG, EMPTY_QUESTION, error_payload
 from .guidance import question_hints
-from .extractors import extract, wants_snapshot
+from .extractors import extract, select_profile, wants_snapshot
 from .sessions import Session, sanitize
 from . import memory
 from . import autostart
@@ -103,8 +103,12 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
         raw = agent_cu.window_text(target, cfg.agent_cu_cmd, cfg.agent_cu_timeout)
         snapshot = None
         if cfg.snapshot_details and wants_snapshot(target):
+            # browser page content lives outside the interactive (-i) tree; the full tree is slower
+            browser = select_profile(target) == "browser"
+            snap_timeout = cfg.agent_cu_timeout * 2 if browser else cfg.agent_cu_timeout
             try:
-                snapshot = agent_cu.window_snapshot(target, cfg.agent_cu_cmd, cfg.agent_cu_timeout)
+                snapshot = agent_cu.window_snapshot(target, cfg.agent_cu_cmd, snap_timeout,
+                                                    interactive=not browser)
             except CuError:
                 snapshot = None  # details are a bonus; the text answer still works
     except CuError as e:
