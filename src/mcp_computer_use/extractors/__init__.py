@@ -14,16 +14,31 @@ from .claude_code import (
     claude_status, extract_claude, claude_text_details, claude_snapshot_details,
 )
 from .generic import extract_generic
-from .registry import EXTRACTORS, SNAPSHOT_DETAILS, PROFILES, register_profile, select_profile
+from .codex_desktop import extract_codex_desktop, codex_snapshot_details
+from .registry import EXTRACTORS, SNAPSHOT_DETAILS, PROFILES, register_profile
+from .registry import select_profile as _select_profile
 
 
-def wants_snapshot(app: str) -> bool:
-    return any(m(app.lower()) for m, _ in SNAPSHOT_DETAILS)
+def select_profile(app_name: str, window_title: str | None = None) -> str:
+    profile = _select_profile(app_name)
+    if profile == "generic" and isinstance(window_title, str) and "codex" in window_title.lower():
+        return "codex_desktop"
+    return profile
+
+
+def wants_snapshot(app: str, window_title: str | None = None) -> bool:
+    return (select_profile(app, window_title) == "codex_desktop"
+            or any(m(app.lower()) for m, _ in SNAPSHOT_DETAILS))
 
 
 def extract(text: str, app: str, max_chars: int = 2000, tail_chars: int = 2000,
-            snapshot: str | None = None) -> Extraction:
+            snapshot: str | None = None, window_title: str | None = None) -> Extraction:
     lines = text.splitlines()
+    snapshot_nodes = parse_snapshot(snapshot) if isinstance(snapshot, str) and snapshot else None
+    if window_title is None and snapshot_nodes is not None:
+        window_title = next((label for _, role, label in snapshot_nodes if role == "window"), None)
+    if select_profile(app, window_title) == "codex_desktop":
+        return extract_codex_desktop(lines, app, max_chars, tail_chars, snapshot=snapshot, snapshot_nodes=snapshot_nodes)
     ex = None
     for match, fn in EXTRACTORS:
         if match(app.lower()):
