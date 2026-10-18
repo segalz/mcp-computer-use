@@ -65,8 +65,9 @@ class OllamaClient:
         model = model or self.cfg.model
         try:
             return any(_same_model(m.get("name") or m.get("model", ""), model) for m in self.running())
-        except CuError:
+        except Exception:  # CuError, AttributeError, TypeError from malformed /api/ps
             return False
+
 
     def has_model(self, model: str | None = None) -> bool:
         model = model or self.cfg.model
@@ -105,21 +106,15 @@ class OllamaClient:
             raise CuError(MODEL_FAILED, f"Ollama HTTP {r.status_code}: {r.text[:200]}")
         return str((r.json().get("message") or {}).get("content", "")).strip()
 
-    def chat_json(self, system: str, user: str, timeout: float,
-                  keep_alive: str | int | None = None) -> tuple[dict, dict]:
-        """Returns (parsed_answer, stats). Raises CuError on any failure."""
+    def _do_chat_request(self, body: dict, timeout: float) -> tuple[dict, dict]:
+        """Send /api/chat and return (parsed_answer_dict, raw_response_data).
+
+        Raises CuError on any transport failure, non-2xx status, or malformed
+        response envelope (body not JSON, message/content not accessible).
+        Does NOT compute stats — callers do that so they can interleave their
+        own validation before stat parsing.
+        """
         model = self.cfg.model
-        body = {
-            "model": model,
-            "stream": False,
-            "messages": [{"role": "system", "content": system},
-                         {"role": "user", "content": user}],
-            "format": ANSWER_SCHEMA,
-            "options": {"num_ctx": self.cfg.num_ctx, "temperature": self.cfg.temperature},
-            # gpt-oss only supports think levels; other models: disable thinking.
-            "think": "low" if model.startswith("gpt-oss") else False,
-            "keep_alive": keep_alive if keep_alive is not None else self.cfg.keep_alive_idle,
-        }
         try:
             with self._client(timeout) as c:
                 r = c.post("/api/chat", json=body)
@@ -130,21 +125,87 @@ class OllamaClient:
         except httpx.HTTPError as e:
             raise CuError(MODEL_FAILED, f"Ollama request failed: {e}")
         if r.status_code == 404:
-            raise CuError(MODEL_NOT_FOUND, f"model '{model}' not found in Ollama at {self.cfg.ollama_url}")
+            raise CuError(MODEL_NOT_FOUND,
+                          f"model '{model}' not found in Ollama at {self.cfg.ollama_url}")
         if r.status_code >= 400:
             raise CuError(MODEL_FAILED, f"Ollama HTTP {r.status_code}: {r.text[:300]}")
-        data = r.json()
-        content = (data.get("message") or {}).get("content", "").strip()
+        # Parse the response envelope; convert any malformed structure to CuError.
+        try:
+            data = r.json()
+            content = str((data.get("message") or {}).get("content", "")).strip()
+        except Exception as exc:
+            raise CuError(MODEL_FAILED, f"Ollama response envelope malformed: {exc}") from exc
         try:
             answer = json.loads(content)
         except json.JSONDecodeError:
             raise CuError(MODEL_FAILED, f"model returned non-JSON output: {content[:200]!r}")
-        if not isinstance(answer, dict) or "summary" not in answer:
-            raise CuError(MODEL_FAILED, f"model JSON missing 'summary': {content[:200]!r}")
-        ev, evd = data.get("eval_count") or 0, data.get("eval_duration") or 0
-        stats = {
-            "eval_tokens": ev,
-            "tokens_per_second": round(ev / (evd / 1e9), 1) if evd else None,
-            "model_seconds": round((data.get("total_duration") or 0) / 1e9, 2),
+        return answer, data
+
+    @staticmethod
+    def _compute_stats(data: dict) -> dict:
+        """Compute the stats dict from a raw response dict; raises CuError on bad types."""
+        try:
+            ev = int(data.get("eval_count") or 0)
+            evd = int(data.get("eval_duration") or 0)
+            return {
+                "eval_tokens": ev,
+                "tokens_per_second": round(ev / (evd / 1e9), 1) if evd else None,
+                "model_seconds": round(int(data.get("total_duration") or 0) / 1e9, 2),
+            }
+        except Exception as exc:
+            raise CuError(MODEL_FAILED, f"Ollama stats malformed: {exc}") from exc
+
+    def _make_chat_body(self, system: str, user: str, schema: dict,
+                        keep_alive: str | int | None, num_predict: int | None) -> dict:
+        """Build the /api/chat request body."""
+        model = self.cfg.model
+        options: dict = {"num_ctx": self.cfg.num_ctx, "temperature": self.cfg.temperature}
+        if num_predict is not None:
+            options["num_predict"] = num_predict
+        return {
+            "model": model,
+            "stream": False,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "format": schema,
+            "options": options,
+            # gpt-oss only supports think levels; other models: disable thinking.
+            "think": "low" if model.startswith("gpt-oss") else False,
+            "keep_alive": keep_alive if keep_alive is not None else self.cfg.keep_alive_idle,
         }
+
+    def chat_schema(self, system: str, user: str, schema: dict, timeout: float,
+                    keep_alive: str | int | None = None,
+                    num_predict: int | None = None) -> tuple[dict, dict]:
+        """Send a structured-output chat request and return (parsed_dict, stats).
+
+        Uses Ollama's ``format`` parameter to enforce *schema*.  The response
+        must be valid JSON; schema-level validation (required keys, types, …)
+        is left to the caller.  Raises CuError on any network / model failure,
+        including malformed response envelopes and invalid stats fields.
+
+        *num_predict* is optional; when provided it is added to ``options``.
+        """
+        body = self._make_chat_body(system, user, schema, keep_alive, num_predict)
+        answer, data = self._do_chat_request(body, timeout)
+        stats = self._compute_stats(data)
         return answer, stats
+
+    def chat_json(self, system: str, user: str, timeout: float,
+                  keep_alive: str | int | None = None) -> tuple[dict, dict]:
+        """Returns (parsed_answer, stats). Raises CuError on any failure.
+
+        The ``summary`` field check is performed **before** stats parsing,
+        preserving the original ordering: a missing summary always raises
+        MODEL_FAILED regardless of whether stats fields are also malformed.
+        """
+        body = self._make_chat_body(system, user, ANSWER_SCHEMA, keep_alive, None)
+        answer, data = self._do_chat_request(body, timeout)
+        # chat_json contract: answer must contain "summary".
+        # This happens before stats — original ordering restored.
+        if not isinstance(answer, dict) or "summary" not in answer:
+            content_repr = repr(str(answer)[:200])
+            raise CuError(MODEL_FAILED, f"model JSON missing 'summary': {content_repr}")
+        stats = self._compute_stats(data)
+        return answer, stats
+
