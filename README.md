@@ -25,7 +25,7 @@ This server does the reading **locally**:
 ## Tools
 | Tool | Description |
 |---|---|
-| `look_at_screen(question, app=None, client=None, session_id=None, keep_warm=False)` | Reads one window and answers. If `app` is omitted, the app named in the question (also Hebrew aliases like "קלוד") or the frontmost app is used. Read-only. `client` / `session_id` are optional (see *Sessions*). CLI: `--ask QUESTION [--app APP]`. |
+| `look_at_screen(question, app=None, client=None, session_id=None, keep_warm=False, include_image=False)` | Reads one window and answers. If `app` is omitted, the app named in the question (also Hebrew aliases like "קלוד") or the frontmost app is used. Read-only. `client` / `session_id` are optional (see *Sessions*). Pass `include_image=True` to also return a downscaled window JPEG. CLI: `--ask QUESTION [--app APP] [--image-out PATH]`. |
 | `click(app, target=None, steps=None, client=None, session_id=None, confirm_dangerous=False)` | Clicks a visible label, or a sequence of 1–10 labels via `steps`. Stopped on first failure. CLI: `--click APP TARGET`, `--click-steps APP STEP...`. |
 | `type_text(app, target, text, client=None, session_id=None, confirm_dangerous=False)` | Sets the value of an editable field in the app without submitting. Replaces content; Enter is never pressed; no keystrokes sent to other windows. CLI: `--type APP TARGET TEXT`. |
 | `ping()` | Heartbeat: server up, local Ollama reachable (auto-started if needed), model replies `pong`. No screen reading. Returns `{ok, server, ollama, model_reply_ok, model, seconds, cold, error?}`. The first ping can take 30–50 s when the model is cold. CLI: `--ping`. |
@@ -37,6 +37,21 @@ This server does the reading **locally**:
 - **Visible labels, never refs**: Pass the visible UI label (1 to 200 characters), never an `@eN` reference. Accessibility element refs change on every snapshot; `@eN` targets are rejected with `INVALID_TARGET`.
 - **Single action vs batches**: Prefer one click per call when exploring or verifying step by step. Use `steps` for a known sequence of 1 to 10 visible labels (e.g. calculator buttons `["7", "+", "5", "="]`). Every step gets a fresh snapshot and runs through the safety gate; execution stops at the first failure.
 - **Direct text entry (`type_text`)**: Sets the value of an editable field (roles: `textfield`, `textarea`, `edit`, `combobox`, `textbox`, `document`, `searchfield`) directly in the target app. It replaces the existing content without submitting — Enter is never pressed, and no keystrokes are sent to other windows. Text length is limited by `max_type_chars` (default 2000).
+
+### Optional window image capture (`include_image`)
+When `include_image=True`, the tool returns the same JSON answer plus an `"image": {"width": int, "height": int, "bytes": int}` metadata dictionary and an MCP image block (`ImageContent`, JPEG format, max 1024 px wide, quality 70) of the **target window only**.
+- **Non-intrusive capture**: Captured via Win32 `PrintWindow` through a bundled PowerShell script (`cu_capture.ps1`). No window is focused, brought to front, moved, or restored. It works while the window is covered by other windows and, in our tests, even while the Windows session is locked.
+- **Failures & Minimization**: If the target window is minimized, `IMAGE_WINDOW_MINIMIZED` is returned. If capture fails for any reason (e.g. blank capture, timeout, window not found), the failure is reported in `"image_error": {"code", "message", "retryable", "suggestion"}` and the text answer is still returned without an image block.
+- **Error codes**:
+  - `IMAGE_CAPTURE_FAILED`: Capture script failed or target window was not found / ambiguous.
+  - `IMAGE_CAPTURE_BLANK`: Captured bitmap was completely blank (window may be minimized or hardware-accelerated).
+  - `IMAGE_WINDOW_MINIMIZED`: Target window is minimized (must be restored to capture).
+  - `IMAGE_CAPTURE_TIMEOUT`: Capture exceeded `image_timeout`.
+- **Configuration**: `image_timeout` (env `MCP_CU_IMAGE_TIMEOUT`, default 15.0 s) sets the subprocess timeout.
+- **CLI**: `mcp-computer-use --ask "What is open?" --app "Calculator" --image-out snapshot.jpg` writes the JPEG to disk and outputs JSON with `image` / `image_error`.
+- **Zero dependencies**: Pure Win32 P/Invoke in PowerShell; no Python imaging libraries (such as Pillow) are required. Default is `False`; when false, output and tool schema are byte-identical and unchanged.
+- **Token cost**:
+  Measured on 2026-10-18 with Codex CLI (one `look_at_screen` call on the Calculator, 644×1067 JPEG ≈ 42 KB): Codex reported total input tokens of 120,991 / 145,588 without the image and 97,326 / 70,301 with it. Run-to-run prompt/context variation (±40k) is larger than any image cost, so the cost of a single image could not be measured this way. Treat images as expensive anyway (typically ~1,000–2,000 tokens per image for vision models) and request `include_image=True` only when text is not enough (inspecting layouts, charts, rendering artifacts, visual glitches).
 
 ### Label matching hierarchy & model resolution
 The server resolves UI targets using a strict ranking hierarchy:
@@ -84,6 +99,10 @@ Every click and type action is recorded in an append-only JSON Lines file at `<p
 | `MODEL_FAILED` | Model inference failed. |
 | `QUESTION_TOO_LONG` | Question exceeds `max_question_chars` (default 300). |
 | `EMPTY_QUESTION` | Question string is empty. |
+| `IMAGE_CAPTURE_FAILED` | Window image capture failed, or target window was not found / ambiguous. |
+| `IMAGE_CAPTURE_BLANK` | Captured image was blank (window may be minimized, hardware-accelerated, or covered). |
+| `IMAGE_WINDOW_MINIMIZED` | Target window is minimized. Restore or un-minimize the window before requesting an image. |
+| `IMAGE_CAPTURE_TIMEOUT` | Window image capture timed out (exceeded `image_timeout`). |
 
 ### CLI options & security notice
 The CLI supports running actions directly:
@@ -297,6 +316,7 @@ Priority: defaults < TOML file < env vars. File: `mcp-computer-use.toml` in the 
 | `MCP_CU_ACTION_LOG_TTL_HOURS` | `24` | Hours before old action audit records are purged |
 | `MCP_CU_RESOLVE_WITH_MODEL` | `true` | Use local model to resolve ambiguous candidates (≤5) |
 | `MCP_CU_MAX_TYPE_CHARS` | `2000` | Max characters allowed for `type_text` |
+| `MCP_CU_IMAGE_TIMEOUT` | `15.0` | Timeout in seconds for window image capture |
 
 Optional HTTP health: `MCP_CU_HEALTH_HTTP=1` (or `--health-http`) → `GET http://127.0.0.1:8765/health`
 (200 when ok, 503 otherwise).
@@ -352,6 +372,7 @@ To see what is on screen or interact with app windows (e.g. "is Claude finished?
 - Optional: pass `client="codex"` and a `session_id` (e.g. "task-1") to get context across calls and `changed_since_last`.
 - Use `details` (project, session, branch, next_step, failures, files) directly from the result.
 - Read first with `look_at_screen` if unsure about the current screen or target labels.
+- Request `include_image=true` only when the text answer is not enough.
 
 ### App actions (`click`, `type_text`)
 - **Click by visible label**: Pass the visible UI label (1–200 chars), never an `@eN` ref; element refs change on every snapshot.
@@ -428,7 +449,7 @@ MIT
 ## הכלים
 | כלי | תיאור |
 |---|---|
-| `look_at_screen(question, app=None, client=None, session_id=None, keep_warm=False)` | קורא חלון אחד ועונה. לקריאה בלבד. ללא `app`, נבחרת התוכנה מהשאלה או החלון שבחזית. ‏`client` ו-`session_id` הם אופציונליים (ראו "סשנים"). שורת פקודה: `--ask QUESTION [--app APP]`. |
+| `look_at_screen(question, app=None, client=None, session_id=None, keep_warm=False, include_image=False)` | קורא חלון אחד ועונה. לקריאה בלבד. ללא `app`, נבחרת התוכנה מהשאלה או החלון שבחזית. ‏`client` ו-`session_id` הם אופציונליים (ראו "סשנים"). העברת `include_image=True` מחזירה בנוסף צילום JPEG של החלון. שורת פקודה: `--ask QUESTION [--app APP] [--image-out PATH]`. |
 | `click(app, target=None, steps=None, client=None, session_id=None, confirm_dangerous=False)` | לוחץ על תווית גלויה, או על רצף של 1 עד 10 תוויות דרך `steps`. נעצר בכישלון ראשון. שורת פקודה: `--click APP TARGET`, `--click-steps APP STEP...`. |
 | `type_text(app, target, text, client=None, session_id=None, confirm_dangerous=False)` | מזין ערך ישירות לשדה עריכה ללא שליחה (Enter אינו נלחץ). מחליף תוכן קיים; לא נשלחות הקשות לחלונות אחרים. שורת פקודה: `--type APP TARGET TEXT`. |
 | `ping()` | בדיקת דופק: מוודא שהשרת עונה, ש-Ollama המקומי זמין (ומפעיל אותו אם צריך), ושהמודל עונה `pong`. לא קורא מסך. מחזיר `{ok, server, ollama, model_reply_ok, model, seconds, cold, error?}`. הפינג הראשון יכול לקחת 30–50 שניות כשהמודל עוד לא טעון (cold). שורת פקודה: `--ping`. |
@@ -440,6 +461,21 @@ MIT
 - **תווית גלויה, לעולם לא מזהי רפרנס**: מעבירים את התווית הגלויה כפי שהיא מופיעה בממשק (1 עד 200 תווים), ולעולם לא מזהה רפרנס כדוגמת `@eN`. מזהי הרפרנס של עץ הנגישות משתנים בכל snapshot; שימוש ביעד בתבנית `@eN` נדחה עם שגיאת `INVALID_TARGET`.
 - **פעולה בודדת מול רצף שלבים**: מומלץ לבצע לחיצה אחת בכל קריאה בעת בדיקה או חקירה של הממשק. עבור רצף ידוע מראש (עד 10 תוויות, כגון מקשי מחשבון `["7", "+", "5", "="]`), משתמשים בפרמטר `steps`. כל שלב מבצע snapshot רענן ועובר שער בטיחות; הרצף נעצר בכישלון הראשון.
 - **הזנת טקסט ישירה (`type_text`)**: מזין ערך ישירות לשדה עריכה (תפקידי `textfield`, `textarea`, `edit`, `combobox`, `textbox`, `document`, `searchfield`) בחלון המבוקש. הפעולה מחליפה את תוכן השדה ללא הגשה (Enter לעולם אינו נלחץ, ולא נשלחות הקשות לחלונות אחרים). אורך הטקסט מוגבל על ידי `max_type_chars` (ברירת מחדל: 2,000 תווים).
+
+### צילום תמונת חלון אופציונלי (`include_image`)
+כאשר מעבירים `include_image=True`, הכלי מחזיר את אותה תשובת JSON בתוספת מילון מטא-דאטה `"image": {"width": int, "height": int, "bytes": int}` ובלוק תמונה של MCP מסוג `ImageContent` (פורמט JPEG, רוחב מרבי של 1024 פיקסלים, איכות 70) של **חלון היעד בלבד**.
+- **צילום שאינו מפריע (Non-intrusive)**: הצילום מתבצע באמצעות קריאת Win32 `PrintWindow` דרך סקריפט PowerShell מובנה (`cu_capture.ps1`). אף חלון אינו מקבל פוקוס, אינו מועבר לחזית, אינו מוזז ואינו משוחזר. הצילום פועל גם כאשר החלון מכוסה בחלונות אחרים, ובבדיקה שלנו אף כאשר סשן ה-Windows היה נעול.
+- **טיפול בכשלים ובחלונות ממוזערים**: אם החלון ממוזער, מוחזרת השגיאה `IMAGE_WINDOW_MINIMIZED`. במקרה של כשל בצילום (תמונה ריקה, חריגת זמן, חלון שלא נמצא או עמום), מוחזר פירוט השגיאה בתוך `"image_error": {"code", "message", "retryable", "suggestion"}` ותשובת הטקסט עדיין מוחזרת במלואה (ללא בלוק תמונה).
+- **קודי שגיאה**:
+  - `IMAGE_CAPTURE_FAILED`: כשל בתהליך הצילום או שהחלון לא נמצא / זוהו מספר חלונות מתאימים (עמימות).
+  - `IMAGE_CAPTURE_BLANK`: התמונה שהתקבלה הייתה ריקה/שחורה לחלוטין (למשל שכבת חומרה מואצת או חלון ממוזער).
+  - `IMAGE_WINDOW_MINIMIZED`: חלון היעד ממוזער (יש לשחזר את החלון כדי לצלמו).
+  - `IMAGE_CAPTURE_TIMEOUT`: תהליך הצילום חרג ממגבלת הזמן שנקבעה ב-`image_timeout`.
+- **הגדרות**: `image_timeout` (משתנה סביבה `MCP_CU_IMAGE_TIMEOUT`, ברירת מחדל: 15.0 שניות) קובע את זמן ההמתנה לצילום.
+- **שורת פקודה**: הפקודה `mcp-computer-use --ask "What is open?" --app "מחשבון" --image-out snapshot.jpg` שומרת את קובץ ה-JPEG לדיסק ומדפיסה את ה-JSON יחד עם מטא-דאטה של `image` או `image_error`.
+- **ללא תלויות חיצוניות**: מבוסס P/Invoke ישיר של Win32 מתוך PowerShell; אין צורך בספריות Python לעיבוד תמונה (כגון Pillow). ברירת המחדל היא `False`; כאשר היא כבויה, פלט הכלי וסכמת ה-MCP נותרים זהים לחלוטין וללא שינוי.
+- **עלות טוקנים (Token cost)**:
+  נמדד ב-18.10.2026 עם Codex CLI (קריאה בודדת ל-`look_at_screen` על מחשבון, קובץ JPEG בגודל 644×1067 כ-42KB): Codex דיווח על 120,991 / 145,588 טוקני קלט ללא התמונה ו-97,326 / 70,301 איתה. השונות בהקשר בין הרצה להרצה (±40k) גדולה יותר מכל עלות של תמונה בודדת, ולכן לא ניתן היה למדוד את עלות התמונה הבודדת בצורה זו. בכל מקרה יש להתייחס לתמונות כיקרות (בדרך כלל כ-1,000–2,000 טוקנים לתמונה במודלי ראייה) ולבקש `include_image=True` אך ורק כאשר תשובת הטקסט אינה מספקת (בדיקת פריסה, תרשימים, באגים חזותיים).
 
 ### מדרג התאמת תוויות ובחירת מועמדים
 השרת מאתר פקדים בממשק לפי מדרג עדיפויות קפדני:
@@ -487,6 +523,10 @@ MIT
 | `MODEL_FAILED` | פעולת המודל נכשלה. |
 | `QUESTION_TOO_LONG` | השאלה ארוכה מ-`max_question_chars` (ברירת מחדל: 300 תווים / default 300). |
 | `EMPTY_QUESTION` | מחרוזת השאלה ריקה. |
+| `IMAGE_CAPTURE_FAILED` | צילום תמונת החלון נכשל, החלון לא נמצא או שנמצאו מספר חלונות מתאימים (עמימות). |
+| `IMAGE_CAPTURE_BLANK` | התמונה שהתקבלה ריקה לחלוטין (החלון עשוי להיות ממוזער, בעל האצת חומרה או מכוסה). |
+| `IMAGE_WINDOW_MINIMIZED` | חלון היעד ממוזער. יש לשחזר את החלון לפני בקשת תמונה. |
+| `IMAGE_CAPTURE_TIMEOUT` | צילום תמונת החלון חרג ממגבלת הזמן הקצוב (`image_timeout`). |
 
 ### אפשרויות שורת הפקודה (CLI) והערת אבטחה
 ניתן להפעיל פעולות ישירות משורת הפקודה:
@@ -645,6 +685,7 @@ mcp-computer-use --ask "Is Claude finished?" --app Claude
 - `MCP_CU_ACTION_LOG_TTL_HOURS`: זמן שימור רשומות ביומן הפעולות בשעות (ברירת מחדל: 24).
 - `MCP_CU_RESOLVE_WITH_MODEL`: שימוש במודל מקומי להכרעה בין מועמדים עמומים (ברירת מחדל: `true`).
 - `MCP_CU_MAX_TYPE_CHARS`: אורך טקסט מרבי להזנה ב-`type_text` (ברירת מחדל: 2000).
+- `MCP_CU_IMAGE_TIMEOUT`: זמן קצוב בשניות לצילום תמונת חלון (ברירת מחדל: 15.0).
 
 את בדיקת התקינות דרך HTTP מפעילים עם `MCP_CU_HEALTH_HTTP=1`, ואז היא זמינה בכתובת `GET http://127.0.0.1:8765/health`.
 
@@ -663,6 +704,7 @@ mcp-computer-use --ask "Is Claude finished?" --app Claude
 - **רצף שלבים ידוע מראש**: משתמשים ב-`steps` לרצף של עד 10 צעדים ידועים (למשל מקשי מחשבון).
 - **בטיחות**: לעולם אין להעביר `confirm_dangerous=true` ללא קבלת אישור אנושי מפורש בצ'אט.
 - **שימוש ב-agent-cu**: אין להריץ את `agent-cu` ישירות ללחיצה או להקלדה אלא אם הכלי נכשל.
+- מבקשים `include_image=true` אך ורק כאשר תשובת הטקסט אינה מספקת (מבנה פריסה, תרשימים, באגים חזותיים).
 - אפשר לשלוח `client` ו-`session_id` ולהשתמש באותו זוג לאורך כל המשימה לקבלת הקשר ו-`changed_since_last`.
 - בסוף המשימה קוראים ל-`release_model()`.
 - כשחוזרת שגיאה, פועלים לפי `suggestion`.

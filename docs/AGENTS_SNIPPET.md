@@ -8,6 +8,7 @@ To see what is on screen or interact with app windows (e.g. "is Claude finished?
 - Optional: pass `client="codex"` and a `session_id` (e.g. "task-1") to get context across calls and `changed_since_last`.
 - Use `details` (project, session, branch, next_step, failures, files) directly from the result.
 - Read first with `look_at_screen` if unsure about the current screen or target labels.
+- Request `include_image=true` only when the text answer is not enough.
 
 ### App actions (`click`, `type_text`)
 - **Click by visible label**: Pass the visible UI label (1–200 chars), never an `@eN` ref; element refs change on every snapshot.
