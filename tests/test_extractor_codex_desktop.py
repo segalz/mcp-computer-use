@@ -40,7 +40,13 @@ def test_real_home_snapshot_identifies_project_and_mode():
 
 def test_real_home_combined_does_not_select_sidebar_project_or_chat():
     result = read_state("home")
-    assert result.details == {"project": "project-alpha", "mode": "Codex"}
+    assert result.details == {
+        "project": "project-alpha", "mode": "Codex",
+        "projects": ["project-alpha", "project-beta", "project-gamma"],
+        "recent_chats": ["בדוק תהליכים פתוחים", "Try CLI integration",
+                         "Fix layout regression", "בדיקת ממשק משתמש"],
+        "needs_attention": True,
+    }
     assert result.status == "unknown"
     assert "project-beta" not in result.last_message
     assert "project-gamma" not in result.last_message
@@ -451,3 +457,101 @@ def test_status_outside_conversation_and_composer_is_ignored():
     snapshot = fixture("working", "snapshot").replace('[@e22] button "Stop"', '')
     snapshot += '\n  status "Thinking…"\n'
     assert extract("", "ChatGPT", snapshot=snapshot).status == "unknown"
+
+
+@pytest.mark.parametrize("source", ["snapshot", "combined"])
+def test_home_sidebar_projects_are_ordered_and_separate_from_active_project(source):
+    details = read_state("home", source).details
+    assert details["projects"] == ["project-alpha", "project-beta", "project-gamma"]
+    assert details["project"] == "project-alpha" and details["mode"] == "Codex"
+
+
+def test_home_recent_chats_use_recents_section_not_project_threads():
+    details = codex_snapshot_details(fixture("home", "snapshot"))
+    assert details["recent_chats"] == ["בדוק תהליכים פתוחים", "Try CLI integration",
+                                       "Fix layout regression", "בדיקת ממשק משתמש"]
+    assert "Refactor parser" not in details["recent_chats"]
+    assert details["needs_attention"] is True
+
+
+@pytest.mark.parametrize("count", [1, 5, 12])
+def test_sidebar_list_sizes_and_label_lengths_are_bounded(count):
+    projects = [f"project-{index}-" + "p" * 100 for index in range(count)]
+    chats = [f"chat-{index}-" + "ש" * 100 for index in range(count)]
+    snapshot = 'group "Home"\n  list\n'
+    for name in projects:
+        snapshot += f'    listitem "{name}"\n      button "{name}"\n        button "Project actions for {name}"\n'
+    snapshot += '  button "Recents"\n  list\n'
+    for name in chats:
+        snapshot += f'    listitem "{name}"\n      button "{name}"\n        button "Pin chat"\n        button "Archive chat"\n'
+    details = codex_snapshot_details(snapshot)
+    assert details["projects"] == [name[:80] for name in projects[:8]]
+    assert details["recent_chats"] == [name[:80] for name in chats[:5]]
+    assert "needs_attention" not in details
+
+
+def test_button_only_sidebar_entries_and_adjacent_actions():
+    snapshot = ('group "Sidebar"\n  button "alpha"\n    button "Project actions for alpha"\n'
+                '  button "beta"\n  button "Project actions for beta"\n'
+                '  button "Recents"\n  button "Thread one"\n    button "Pin chat"\n    button "Archive chat"\n'
+                '  button "Thread two"\n  button "Pin chat"\n  button "Archive chat"')
+    details = codex_snapshot_details(snapshot)
+    assert details["projects"] == ["alpha", "beta"]
+    assert details["recent_chats"] == ["Thread one", "Thread two"]
+
+
+def test_sidebar_labels_without_action_controls_are_not_invented_as_entries():
+    snapshot = ('group "Home"\n  listitem "Not a project"\n    button "Unrelated action"\n'
+                '  listitem "Not a chat"\n    statictext "Pin chat"\n    statictext "Archive chat"')
+    details = codex_snapshot_details(snapshot)
+    assert "projects" not in details and "recent_chats" not in details
+
+
+def test_sidebar_project_action_must_match_the_label():
+    snapshot = 'group "Home"\n  listitem "alpha"\n    button "Project actions for beta"'
+    assert "projects" not in codex_snapshot_details(snapshot)
+
+
+def test_message_content_and_message_lists_never_become_sidebar_metadata():
+    snapshot = (fixture("home", "snapshot") + '\n  group "Conversation"\n'
+                '    group "Assistant turn"\n      statictext "Secret message"\n'
+                '      listitem "Message project"\n        button "Project actions for Message project"\n'
+                '      listitem "Message chat"\n        button "Pin chat"\n        button "Archive chat"')
+    details = codex_snapshot_details(snapshot)
+    assert details["projects"] == ["project-alpha", "project-beta", "project-gamma"]
+    assert all("Message" not in name for name in details["recent_chats"])
+    assert "Secret message" not in str(details)
+
+
+def test_message_group_nested_in_sidebar_is_excluded():
+    snapshot = ('group "Home"\n  group "Assistant turn"\n'
+                '    listitem "Message project"\n      button "Project actions for Message project"\n'
+                '    listitem "Message chat"\n      button "Pin chat"\n      button "Archive chat"')
+    details = codex_snapshot_details(snapshot)
+    assert "projects" not in details and "recent_chats" not in details
+
+
+def test_text_alone_does_not_invent_sidebar_details():
+    result = read_state("home", "text")
+    assert not {"projects", "recent_chats", "needs_attention"} & result.details.keys()
+
+
+@pytest.mark.parametrize("role, expected", [("button", True), ("statictext", False)])
+def test_attention_flag_requires_a_control(role, expected):
+    details = codex_snapshot_details(f'{role} "View activity, needs attention"')
+    assert (details.get("needs_attention") is True) is expected
+
+
+def test_sidebar_lists_do_not_replace_assistant_message_or_status():
+    snapshot = fixture("finished", "snapshot")
+    sidebar = ('                        listitem "alpha"\n'
+               '                          button "Project actions for alpha"\n'
+               '                        button "Recents"\n'
+               '                        listitem "Recent thread"\n'
+               '                          button "Pin chat"\n                          button "Archive chat"\n')
+    snapshot = snapshot.replace('                    group id=_r_7p_', sidebar + '                    group id=_r_7p_', 1)
+    before = read_state("finished", "snapshot")
+    after = extract("", "ChatGPT", snapshot=snapshot)
+    assert after.details["projects"] == ["alpha"]
+    assert after.details["recent_chats"] == ["Recent thread"]
+    assert after.status == before.status and after.last_message == before.last_message

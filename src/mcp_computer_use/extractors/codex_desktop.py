@@ -139,9 +139,60 @@ def _text_info(lines: list[str]) -> tuple[dict, list[str], str]:
     return details, body, status
 
 
-def _snapshot_info(nodes: list[tuple[int, str, str]]) -> tuple[dict, list[str], str, bool]:
+def _sidebar_details(nodes: list[tuple[int, str, str]]) -> dict:
+    """Read sidebar labels only, corroborated by their nested action controls."""
     details = {}
+    projects = []
+    chats = []
+    recent_chats = []
+    has_recents = False
     for index, (_, role, label) in enumerate(nodes):
+        if role not in {"group", "navigation", "region"} or label.casefold() not in {"home", "sidebar"}:
+            continue
+        sidebar = _scope(nodes, index)
+        in_recents = False
+        skip_until = -1
+        for position, (_, child_role, name) in enumerate(sidebar):
+            if position < skip_until:
+                continue
+            if child_role == "group" and name in {"Conversation", "Assistant turn", "User turn"}:
+                skip_until = position + 1 + len(_scope(sidebar, position))
+                continue
+            if child_role == "button" and name == "View activity, needs attention":
+                details["needs_attention"] = True
+            if child_role == "button" and name == "Recents":
+                has_recents = in_recents = True
+            if child_role not in {"listitem", "button"} or not name.strip():
+                continue
+            children = _scope(sidebar, position)
+            controls = {value for _, control_role, value in children if control_role == "button"}
+            if child_role == "button" and not children:
+                # Some snapshots flatten the action buttons beside the label.
+                for depth, control_role, value in sidebar[position + 1:position + 3]:
+                    if depth != sidebar[position][0] or control_role != "button":
+                        break
+                    controls.add(value)
+            if "Project actions for " + name in controls:
+                if name not in projects:
+                    projects.append(name)
+            elif {"Pin chat", "Archive chat"} <= controls:
+                if name not in chats:
+                    chats.append(name)
+                if in_recents and name not in recent_chats:
+                    recent_chats.append(name)
+    if projects:
+        details["projects"] = [name[:80] for name in projects[:8]]
+    selected_chats = recent_chats if has_recents else chats
+    if selected_chats:
+        details["recent_chats"] = [name[:80] for name in selected_chats[:5]]
+    return details
+
+
+def _snapshot_info(nodes: list[tuple[int, str, str]]) -> tuple[dict, list[str], str, bool]:
+    details = _sidebar_details(nodes)
+    for index, (_, role, label) in enumerate(nodes):
+        if role == "button" and label == "View activity, needs attention":
+            details["needs_attention"] = True
         mode = _MODE.fullmatch(label) if role == "button" else None
         if mode:
             details["mode"] = mode[1]
