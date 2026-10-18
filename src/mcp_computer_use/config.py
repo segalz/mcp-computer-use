@@ -47,6 +47,11 @@ class Config:
     autostart_ollama: bool = True    # start a local `ollama serve` when the localhost URL is unreachable
     autostart_timeout: float = 10.0  # seconds to wait for /api/tags after starting
     stateless_hint_window: float = 900.0  # seconds; repeated calls without session_id get a hint
+    safety_blocklist: str = ""
+    safety_blocklist_extra: str = ""
+    action_log_ttl_hours: float = 24.0
+    resolve_with_model: bool = True
+    max_type_chars: int = 2000
 
 
 # Short env aliases requested for convenience (in addition to MCP_CU_<FIELD>).
@@ -80,11 +85,37 @@ def load_config(path: str | Path | None = None, env: dict | None = None) -> Conf
     types = {f.name: f.type for f in fields(Config)}
     file_path = Path(path) if path else default_config_path()
     if file_path and file_path.is_file():
-        data = tomllib.loads(file_path.read_text(encoding="utf-8"))
-        data = data.get("mcp_computer_use", data)
+        raw_data = tomllib.loads(file_path.read_text(encoding="utf-8"))
+        data = raw_data.get("mcp_computer_use", raw_data)
         for k, v in data.items():
             if k in types:
-                setattr(cfg, k, _coerce(v, types[k]))
+                if k in ("safety_blocklist", "safety_blocklist_extra") and isinstance(v, (list, tuple)):
+                    setattr(cfg, k, ",".join(str(x).strip() for x in v))
+                else:
+                    setattr(cfg, k, _coerce(v, types[k]))
+
+        safety_data: dict = {}
+        if isinstance(raw_data.get("safety"), dict):
+            safety_data.update(raw_data["safety"])
+        if isinstance(raw_data.get("mcp_computer_use"), dict) and isinstance(raw_data["mcp_computer_use"].get("safety"), dict):
+            safety_data.update(raw_data["mcp_computer_use"]["safety"])
+
+        bl = safety_data.get("blocklist", safety_data.get("safety_blocklist"))
+        if bl is None and "blocklist" in data and not isinstance(data.get("blocklist"), dict):
+            bl = data["blocklist"]
+        if bl is not None:
+            cfg.safety_blocklist = ",".join(str(x).strip() for x in bl) if isinstance(bl, (list, tuple)) else str(bl)
+
+        ble = safety_data.get("blocklist_extra", safety_data.get("safety_blocklist_extra"))
+        if ble is None and "blocklist_extra" in data and not isinstance(data.get("blocklist_extra"), dict):
+            ble = data["blocklist_extra"]
+        if ble is not None:
+            cfg.safety_blocklist_extra = ",".join(str(x).strip() for x in ble) if isinstance(ble, (list, tuple)) else str(ble)
+
+        for field_name in ("action_log_ttl_hours", "resolve_with_model", "max_type_chars"):
+            if field_name in safety_data:
+                setattr(cfg, field_name, _coerce(safety_data[field_name], types[field_name]))
+
     for alias, name in ALIASES.items():
         if alias in env and env[alias]:
             setattr(cfg, name, _coerce(env[alias], types[name]))

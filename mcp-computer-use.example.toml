@@ -29,3 +29,10 @@ memory_watch_interval = 30
 autostart_ollama = true
 autostart_timeout = 10
 # system_prompt_file = "C:/Develop/mcp-computer-use/my_prompt.md"
+#
+# [safety]
+# blocklist = ["Archive"]          # adds to DEFAULT_BLOCKLIST (defaults are always enforced)
+# blocklist_extra = ["Drop"]
+# action_log_ttl_hours = 24
+# resolve_with_model = true
+# max_type_chars = 2000
