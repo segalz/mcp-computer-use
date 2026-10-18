@@ -1,0 +1,13 @@
+C:/work/site/index.html
+file:///C:/work/site/index.html
+Build dashboard
+file:///C:/work/site/index.html#runs
+ 
+file:///C:/work/site/index.html#settings
+Latest run #42
+Status: Failed
+Error: 2 tests failed in parser_test.py
+Search
+Query 
+סיכום
+הבנייה נכשלה. השלב הבא: לתקן את הבדיקות.

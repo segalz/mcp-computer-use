@@ -1,0 +1,31 @@
+window "Build dashboard - Example - Google Chrome"
+  group "Build dashboard - Example - Google Chrome"
+    group
+      group
+        group
+          [@e1] button "Minimise" id=view_1
+          [@e2] button "Maximise" id=view_2
+          [@e3] button "Close" id=view_4
+        group
+          group
+            toolbar id=view_1000
+              [@e4] button "Back" id=view_1001
+              [@e5] button "Forward" id=view_1002
+              [@e6] button "Reload" id=view_1003
+              group
+                [@e7] button "File" id=view_1011
+                [@e8] textfield "Address and search bar" val="C:/work/site/index.html" id=view_1012
+                group
+                  [@e9] button "Bookmark this tab"
+              [@e10] button "You" id=view_1018
+              [@e11] button "Action required" id=view_1007
+          group
+            group
+          group
+            group
+              [@e12] button "Tab search"
+            group id=view_21
+              tabgroup
+                [@e13] tab "Build dashboard - Example - Memory usage - 20.4 MB" id=view_20
+                  [@e14] button "Close"
+            [@e15] button "New tab"

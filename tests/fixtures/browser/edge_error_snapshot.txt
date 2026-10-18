@@ -1,0 +1,71 @@
+window "example.com - Profile 1 - Microsoft​ Edge"
+  group "example.com - Network error - Microsoft Edge"
+    group
+      group
+        group
+          [@e1] button "Minimise" id=view_2
+          [@e2] button "Maximise" id=view_3
+          [@e3] button "Close" id=view_7
+        group
+          group
+            toolbar "App bar" id=view_1000
+              [@e4] button "Back" id=view_1001
+              [@e5] button "Refresh" id=view_1003
+              [@e6] button "Home" id=view_1004
+              group
+                [@e7] button "View site information" id=view_1015
+                [@e8] textfield "Address and search bar" val="https://example.com" id=view_1017
+                group
+                  [@e9] button "Add this page to favourites (Ctrl+D)" id=view_1006
+              group
+                [@e10] button "Favourites" id=view_1007
+              [@e11] button "Profile 1 Profile" id=view_1009
+              [@e12] button "Settings and more (Alt+F)" id=view_1011
+              group
+                [@e13] button "Chat" id=view_1078
+                [@e14] button "Copilot menu" id=view_1095
+            toolbar "Favourites bar" id=view_1041
+              toolbar "Saved Tab Groups"
+                [@e15] button "Tab groups"
+              group "Separator"
+              [@e16] button "Import favourites"
+              group "Separator"
+              [@e17] listitem "Example bookmark 1" id=view_1044
+              [@e18] listitem "Example bookmark 2" id=view_1044
+              [@e19] listitem "Example bookmark 3" id=view_1044
+              [@e20] listitem "Example bookmark 4" id=view_1044
+              [@e21] listitem "Example bookmark 5" id=view_1044
+              [@e22] listitem "Example bookmark 6" id=view_1044
+              [@e23] button "Menu containing hidden favourites"
+              [@e24] button "Other favourites" id=view_1042
+              group "Separator"
+          group
+            group
+              group
+                group
+                  group
+                [@e25] textfield
+          tabgroup "Tab bar"
+            [@e26] button "Search tabs" id=view_1052
+            group id=view_25
+              tabgroup
+                [@e27] tab "example.com - Network error" id=view_24
+                  [@e28] button "Close tab" id=view_27
+                group
+                  group
+            [@e29] button "New Tab" id=view_28
+    group
+      window "Sync your profile"
+        group
+          group
+            group
+              group
+                group
+                  [@e30] textarea "We are now syncing your browsing data across all your devices" val="edge://sync-confirmation-dialog/" id=RootWebArea
+                    statictext "We are now syncing your browsing data across all your devices"
+                    statictext "user@example.com has signed in on this device, so we've also signed you in to Microsoft Edge."
+                    statictext "Always have access to your favourites, passwords, history, and more anywhere you use Microsoft Edge."
+                    statictext "To sign out, go to Settings > Profiles."
+                    [@e31] link "Microsoft Privacy Statement" val="edge://sync-confirmation-dialog/#" id=privacy-link
+                    [@e32] button "Got it" id=got-it-button
+                    [@e33] button "Customise" id=customize-button

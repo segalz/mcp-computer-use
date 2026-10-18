@@ -1,0 +1,53 @@
+[@e1] window "Build dashboard - Example - Google Chrome"
+  [@e2] group "Build dashboard - Example - Google Chrome"
+    [@e3] group
+      [@e4] group
+        [@e5] group
+          [@e6] button "Minimise" id=view_1
+          [@e7] button "Maximise" id=view_2
+          [@e8] button "Close" id=view_4
+        [@e9] group
+          [@e10] group
+            [@e11] toolbar id=view_1000
+              [@e12] button "Back" id=view_1001
+              [@e13] button "Forward" id=view_1002
+              [@e14] button "Reload" id=view_1003
+              [@e15] group
+                [@e16] button "File" id=view_1011
+                [@e17] textfield "Address and search bar" val="C:/work/site/index.html" id=view_1012
+                [@e18] group
+                  [@e19] button "Bookmark this tab"
+              [@e20] button "You" id=view_1018
+              [@e21] button "Action required" id=view_1007
+          [@e22] group
+            [@e23] group
+              [@e24] textarea "Build dashboard - Example" val="file:///C:/work/site/index.html" id=RootWebArea
+                [@e25] group
+                  [@e26] statictext "Build dashboard"
+                  [@e27] group
+                    [@e28] link "Runs" val="file:///C:/work/site/index.html#runs"
+                    [@e29] statictext " "
+                    [@e30] link "Settings" val="file:///C:/work/site/index.html#settings"
+                [@e31] group
+                  [@e32] statictext "Latest run #42"
+                  [@e33] statictext "Status: Failed"
+                  [@e34] statictext "Error: 2 tests failed in parser_test.py"
+                  [@e35] list
+                    [@e36] listitem "test_parse_empty - passed"
+                    [@e37] listitem "test_parse_unicode - failed"
+                    [@e38] listitem "test_parse_large - failed"
+                  [@e39] button "Re-run"
+                  [@e40] button "Download logs"
+                  [@e41] statictext "Search"
+                  [@e42] statictext "Query "
+                  [@e43] textfield "Query"
+                  [@e44] statictext "סיכום"
+                  [@e45] statictext "הבנייה נכשלה. השלב הבא: לתקן את הבדיקות."
+          [@e46] group
+            [@e47] group
+              [@e48] button "Tab search"
+            [@e49] group id=view_21
+              [@e50] tabgroup
+                [@e51] tab "Build dashboard - Example - Memory usage - 20.4 MB" id=view_20
+                  [@e52] button "Close"
+            [@e53] button "New tab"
