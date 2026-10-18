@@ -17,7 +17,7 @@ How to call it:
 - To check the bridge works before a task, call ping() (the first ping can take 30-50 s while the model loads).
 - If the local Ollama is down, the server starts it automatically (checked on calls without a session and on the first call of a session).
 - Memory: the local model stays loaded 3 min after a single call and 10 min while a session is active (or with keep_warm=true), and is unloaded early if free RAM gets low. When your task is done, call release_model() to free the memory right away.
-- Use click(app, target) or type_text(app, target, text) for app-scoped actions. Pass the visible label, not a ref; refs change between snapshots. Prefer one click per call. Read with look_at_screen first if unsure.
+- Use click(app, target) or type_text(app, target, text) for app-scoped actions. Pass the visible label, not a ref; refs change between snapshots. Prefer one click per call when exploring; use click(app, steps=[...]) for a known sequence of up to 10 labels, such as calculator keys. Every step has a safety gate and a fresh snapshot; failure stops the batch. Read with look_at_screen first if unsure.
 - Dangerous actions require human approval: You MUST ask the human user and get explicit approval before setting confirm_dangerous=true. Actions only log client/session_id; they do not create context sessions.
 - If the result has `error`, follow `error.suggestion`: on OLLAMA_UNREACHABLE call health() first; on MODEL_TIMEOUT retry once; on APP_NOT_FOUND retry with an `app` from `available_apps`; on QUESTION_TOO_LONG split the question. `extracted` holds the short raw text you can still use.
 - A `hint` field is advice for your next call; the answer is still valid.
@@ -95,7 +95,7 @@ CONFIRM_DESCRIPTION = (
     "Default false; confirms a dangerous action only after that approval."
 )
 CLICK_DESCRIPTION = (
-    "Click one visible UI label in the named app. Prefer one click per call. "
+    "Click a visible label, or use steps for a known sequence (max 10), such as calculator keys. Prefer one click per call when exploring. "
     "Read with look_at_screen first if unsure. Pass the visible label, not a ref; refs change. "
     + CONFIRM_DESCRIPTION
 )
@@ -106,3 +106,9 @@ TYPE_DESCRIPTION = (
 )
 TARGET_DESCRIPTION = "Visible label (1 to 200 characters), not an @eN ref; refs change every snapshot. Add a role to clarify ambiguity."
 TEXT_DESCRIPTION = "Text to set in the editable field, within max_type_chars. Never submitted or included in action results or logs."
+
+STEPS_DESCRIPTION = (
+    "Optional known sequence of 1 to 10 visible labels, e.g. calculator keys. Pass exactly one of target or steps. For a batch, omit target and supply steps. "
+    "Every step is checked by the safety gate, with a fresh snapshot per step. Stops on the first failure. "
+    "Pre-flight safety checks all step labels before any click. step_index is zero-based in pre-flight errors."
+)

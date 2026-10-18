@@ -531,3 +531,234 @@ def test_server_and_memory_watcher_share_client(cfg, monkeypatch):
     server.main([])
     assert constructed == [shared]
     assert seen == [("watcher", shared), ("watcher_started", shared), ("server", shared)]
+
+
+
+def test_batch_hebrew_calculator_and_five_audit_records(cfg, fake_cu):
+    fake_cu.snaps["Calculator"] = (Path(__file__).parent / "fixtures/snapshots/calculator_he.txt").read_text(encoding="utf-8")
+    steps = ["נקה", "7", "+", "8", "="]
+    result = core.click("Calculator", cfg=cfg, steps=steps, client="codex", session_id="batch")
+    expected = ["@e15", "@e32", "@e23", "@e33", "@e24"]
+    assert result["ok"] and result["completed"] == 5 and result["action"] == "click"
+    assert [step["target"] for step in result["steps"]] == steps
+    assert [step["clicked"]["ref"] for step in result["steps"]] == expected
+    assert fake_cu.clicked == {"Calculator": expected}
+    assert len(fake_cu.calls) == 10
+    assert [call[0] for call in fake_cu.calls] == ["snapshot", "click"] * 5
+    log = records(cfg)
+    assert len(log) == 5 and [record["ref"] for record in log] == expected
+    assert all(record["result"] == "done" and record["session_id"] == "batch" for record in log)
+    assert not list(sessions_dir(cfg).glob("*__*.json"))
+
+
+def test_batch_preflight_checks_every_label_before_any_click(cfg, fake_cu, monkeypatch):
+    seen = []
+    original = safety.is_dangerous
+    def trace(target, name, words):
+        assert not fake_cu.calls
+        seen.append(target)
+        return original(target, name, words)
+    monkeypatch.setattr(safety, "is_dangerous", trace)
+    result = core.click("Editor", cfg=cfg, steps=["Seven", "Plus", "Delete", "Equals"])
+    assert seen == ["Seven", "Plus", "Delete", "Equals"]
+    assert result["error"]["code"] == "DANGEROUS_ACTION_NEEDS_CONFIRMATION"
+    assert result["step_index"] == 2 and result["matched_rule"] == "Delete"
+    assert result["completed"] == 0 and not result["ok"]
+    assert result["steps"][0]["target"] == "Delete"
+    assert not fake_cu.calls and not fake_cu.clicked and not fake_cu.typed
+    assert len(records(cfg)) == 1 and records(cfg)[0]["result"] == "blocked"
+
+
+def test_batch_element_name_block_stops_after_prior_success(cfg, fake_cu):
+    snapshot(fake_cu, '[@e1] button "Seven"\n[@e2] button "Delete file" id=OK\n[@e3] button "Equals"')
+    result = core.click("Editor", cfg=cfg, steps=["Seven", "OK", "Equals"])
+    assert not result["ok"] and result["completed"] == 1
+    assert len(result["steps"]) == 2
+    assert result["steps"][1]["error"]["code"] == "DANGEROUS_ACTION_NEEDS_CONFIRMATION"
+    assert result["steps"][1]["would_click"]["ref"] == "@e2"
+    assert fake_cu.clicked == {"Editor": ["@e1"]}
+    assert [record["result"] for record in records(cfg)] == ["done", "blocked"]
+    assert [call[0] for call in fake_cu.calls] == ["snapshot", "click", "snapshot"]
+
+
+def test_batch_ambiguity_stops_with_candidates(cfg, fake_cu):
+    cfg.resolve_with_model = False
+    snapshot(fake_cu, '[@e1] button "Seven"\n[@e2] button "Close"\n[@e3] button "Close"\n[@e4] button "Equals"')
+    result = core.click("Editor", cfg=cfg, steps=["Seven", "Close", "Equals"])
+    assert result["completed"] == 1 and not result["ok"]
+    assert result["steps"][1]["error"]["code"] == "TARGET_AMBIGUOUS"
+    assert len(result["steps"][1]["candidates"]) == 2
+    assert fake_cu.clicked == {"Editor": ["@e1"]}
+    assert [record["result"] for record in records(cfg)] == ["done", "ambiguous"]
+
+
+@pytest.mark.parametrize("steps", [[], ["Seven"] * 11, "Seven", ["Seven", ""], ["Seven", "x" * 201],
+                                   ["Seven", "@e5"], ["Seven", 7], ["Seven", None]])
+def test_batch_validation_precedes_every_action(cfg, fake_cu, steps):
+    result = core.click("Editor", cfg=cfg, steps=steps)
+    assert result["error"]["code"] == "INVALID_TARGET"
+    assert result["completed"] == 0 and not fake_cu.calls
+    assert not fake_cu.clicked and not fake_cu.typed
+    if isinstance(steps, list) and len(steps) > 10:
+        assert "max 10 steps" in result["error"]["message"]
+    assert len(records(cfg)) == 1
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"target": "Seven", "steps": ["Seven"]}, {"target": "", "steps": ["Seven"]}])
+def test_exactly_one_of_target_or_steps(cfg, fake_cu, kwargs):
+    result = core.click("Editor", cfg=cfg, **kwargs)
+    assert result["error"]["code"] == "INVALID_TARGET"
+    assert not fake_cu.calls and records(cfg)[0]["result"] == "error"
+
+
+def test_batch_fresh_snapshot_refs_each_step(cfg, fake_cu, monkeypatch):
+    snapshots = iter(['[@e10] button "Seven"', '[@e99] button "Equals"'])
+    original = fake_cu
+    def changing(args, **kwargs):
+        if args[1] == "snapshot":
+            fake_cu.snaps["Editor"] = next(snapshots)
+        return original(args, **kwargs)
+    monkeypatch.setattr(agent_cu.subprocess, "run", changing)
+    result = core.click("Editor", cfg=cfg, steps=["Seven", "Equals"])
+    assert result["ok"] and fake_cu.clicked == {"Editor": ["@e10", "@e99"]}
+    assert [step["clicked"]["ref"] for step in result["steps"]] == ["@e10", "@e99"]
+
+
+def test_batch_confirmed_dangerous_target_executes(cfg, fake_cu):
+    snapshot(fake_cu, '[@e1] button "Seven"\n[@e2] button "Delete file"')
+    result = core.click("Editor", cfg=cfg, steps=["Seven", "Delete file"], confirm_dangerous=True)
+    assert result["ok"] and result["completed"] == 2
+    assert fake_cu.clicked == {"Editor": ["@e1", "@e2"]}
+    assert all(record["confirmed"] is True for record in records(cfg))
+
+
+def test_batch_model_pick_uses_shared_client(cfg, fake_cu):
+    snapshot(fake_cu, '[@e1] button "Seven"\n[@e2] button "Close"\n[@e3] button "Close"')
+    sent = []
+    shared = make_ollama(cfg, chat={"ref": "@e3"}, record=sent)
+    result = core.click("Editor", cfg=cfg, steps=["Seven", "Close"], ollama=shared)
+    assert result["ok"] and result["steps"][1]["match"] == "model"
+    assert fake_cu.clicked == {"Editor": ["@e1", "@e3"]} and len(sent) == 1
+
+
+@pytest.mark.parametrize("failure", ["missing", "exit"])
+def test_batch_first_error_stops_later_steps(cfg, fake_cu, monkeypatch, failure):
+    cfg.resolve_with_model = False
+    snapshot(fake_cu, '[@e1] button "Seven"\n[@e2] button "Equals"')
+    if failure == "exit":
+        def run(args, **kwargs):
+            if args[1] == "click" and args[2] == "@e2":
+                return subprocess.CompletedProcess(args, 1, "", "failed")
+            return fake_cu(args, **kwargs)
+        monkeypatch.setattr(agent_cu.subprocess, "run", run)
+    result = core.click("Editor", cfg=cfg, steps=["Seven", "zzzz" if failure == "missing" else "Equals", "Seven"])
+    assert not result["ok"] and result["completed"] == 1 and len(result["steps"]) == 2
+    assert result["steps"][1]["error"]["code"] == ("TARGET_NOT_FOUND" if failure == "missing" else "AGENT_CU_FAILED")
+    assert fake_cu.clicked == {"Editor": ["@e1"]}
+    assert len(records(cfg)) == 2
+
+
+def test_batch_size_bound_ten_steps_500_elements(cfg, fake_cu):
+    labels = [chr(0x05D0 + index) * 200 for index in range(10)]
+    snapshot(fake_cu, '\n'.join(f'[@e{index + 1}] button "{labels[index % 10]}" id=key_{index}' for index in range(500)))
+    result = core.click("Editor", cfg=cfg, steps=[f"key_{index}" for index in range(10)])
+    assert result["ok"] and result["completed"] == 10 and len(result["steps"]) == 10
+    assert fake_cu.clicked == {"Editor": [f"@e{index + 1}" for index in range(10)]}
+    assert len(records(cfg)) == 10
+    assert len(json.dumps(result, indent=2)) < 3000
+    assert len(json.dumps(result, ensure_ascii=False)) < 3000
+    assert "snapshot" not in result
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_cli_click_steps(cfg, fake_cu, monkeypatch, capsys, confirmed):
+    monkeypatch.setattr(server, "load_config", lambda path: cfg)
+    snapshot(fake_cu, '[@e1] button "Seven"\n[@e2] button "Delete file"')
+    args = ["--click-steps", "Editor", "Seven", "Delete file", "--client", "codex", "--session-id", "batch-cli"]
+    if confirmed:
+        args.append("--confirm-dangerous")
+    server.main(args)
+    result = json.loads(capsys.readouterr().out)
+    assert result["ok"] is confirmed
+    if confirmed:
+        assert result["completed"] == 2 and fake_cu.clicked == {"Editor": ["@e1", "@e2"]}
+    else:
+        assert result["completed"] == 0 and not fake_cu.calls
+    assert all(record["client"] == "codex" and record["session_id"] == "batch-cli" for record in records(cfg))
+
+
+def test_cli_click_steps_requires_a_step(cfg, fake_cu, monkeypatch, capsys):
+    monkeypatch.setattr(server, "load_config", lambda path: cfg)
+    server.main(["--click-steps", "Editor"])
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "INVALID_TARGET"
+    assert not fake_cu.calls
+
+
+
+def test_batch_long_literal_targets_remain_bounded(cfg, fake_cu):
+    labels = [chr(0x05D0 + index) * 199 + str(index) for index in range(10)]
+    snapshot(fake_cu, '\n'.join(f'[@e{index + 1}] button "{labels[index] if index < 10 else "unused label " + str(index)}"'
+                               for index in range(500)))
+    result = core.click("Editor", cfg=cfg, steps=labels)
+    assert result["ok"] and result["completed"] == 10 and len(result["steps"]) == 10
+    assert len(json.dumps(result, indent=2)) < 3000
+    assert len(records(cfg)) == 10
+
+
+def test_batch_failure_candidate_lists_are_bounded(cfg, fake_cu):
+    cfg.resolve_with_model = False
+    label = "ש" * 200
+    snapshot(fake_cu, '[@e1] button "Seven"\n' + '\n'.join(
+        f'[@e{index + 2}] button "{label}"' for index in range(500)))
+    result = core.click("Editor", cfg=cfg, steps=["Seven", label, "Equals"])
+    assert not result["ok"] and result["completed"] == 1 and len(result["steps"]) == 2
+    assert len(result["steps"][1]["candidates"]) <= 5
+    assert result["steps"][1]["error"]["code"] == "TARGET_AMBIGUOUS"
+    assert len(json.dumps(result, indent=2)) < 3000
+    assert fake_cu.clicked == {"Editor": ["@e1"]}
+
+
+def test_cli_rejects_both_click_forms(cfg, fake_cu, monkeypatch, capsys):
+    monkeypatch.setattr(server, "load_config", lambda path: cfg)
+    server.main(["--click", "Editor", "Seven", "--click-steps", "Editor", "Equals"])
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "INVALID_TARGET"
+    assert not fake_cu.calls
+
+
+
+def test_mcp_batch_dispatch_uses_shared_client(cfg, fake_cu, monkeypatch):
+    snapshot(fake_cu, '[@e1] button "Seven"\n[@e2] button "Equals"')
+    shared = make_ollama(cfg)
+    original = core.click
+    seen = []
+    def capture(*args, **kwargs):
+        seen.append(kwargs["ollama"])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(core, "click", capture)
+    mcp = server.build_server(cfg, ollama=shared)
+    asyncio.run(mcp.call_tool("click", {"app": "Editor", "target": None, "steps": ["Seven", "Equals"]}))
+    assert seen == [shared]
+    assert fake_cu.clicked == {"Editor": ["@e1", "@e2"]}
+    assert len(records(cfg)) == 2
+
+
+def test_mcp_batch_rejects_both_inputs(cfg, fake_cu):
+    mcp = server.build_server(cfg, ollama=make_ollama(cfg))
+    response = asyncio.run(mcp.call_tool("click", {"app": "Editor", "target": "Seven", "steps": ["Equals"]}))
+    assert "INVALID_TARGET" in str(response) and not fake_cu.calls
+
+
+def test_mcp_batch_preflight_never_executes_early_steps(cfg, fake_cu):
+    mcp = server.build_server(cfg, ollama=make_ollama(cfg))
+    response = asyncio.run(mcp.call_tool("click", {"app": "Editor", "target": None, "steps": ["Seven", "Delete"]}))
+    assert "DANGEROUS_ACTION_NEEDS_CONFIRMATION" in str(response)
+    assert not fake_cu.calls and records(cfg)[0]["result"] == "blocked"
+
+
+
+def test_mcp_batch_accepts_omitted_target(cfg, fake_cu):
+    snapshot(fake_cu, '[@e1] button "Seven"\n[@e2] button "Equals"')
+    mcp = server.build_server(cfg, ollama=make_ollama(cfg))
+    asyncio.run(mcp.call_tool("click", {"app": "Editor", "steps": ["Seven", "Equals"]}))
+    assert fake_cu.clicked == {"Editor": ["@e1", "@e2"]}
+    assert [record["result"] for record in records(cfg)] == ["done", "done"]

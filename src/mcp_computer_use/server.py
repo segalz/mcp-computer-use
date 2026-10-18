@@ -20,7 +20,7 @@ from . import core
 from .guidance import (INSTRUCTIONS, LOOK_DESCRIPTION, HEALTH_DESCRIPTION,
                        QUESTION_DESCRIPTION, APP_DESCRIPTION, CLIENT_DESCRIPTION, SESSION_DESCRIPTION,
                        RELEASE_DESCRIPTION, KEEP_WARM_DESCRIPTION, PING_DESCRIPTION,
-                       CLICK_DESCRIPTION, TYPE_DESCRIPTION, TARGET_DESCRIPTION, TEXT_DESCRIPTION, CONFIRM_DESCRIPTION)
+                       CLICK_DESCRIPTION, TYPE_DESCRIPTION, TARGET_DESCRIPTION, TEXT_DESCRIPTION, CONFIRM_DESCRIPTION, STEPS_DESCRIPTION)
 from .memory import MemoryWatcher
 from .ollama_client import OllamaClient
 from .config import Config, load_config
@@ -45,13 +45,14 @@ def build_server(cfg: Config, ollama: OllamaClient | None = None) -> _Server:
     @mcp.tool(description=CLICK_DESCRIPTION)
     def click(
         app: Annotated[str, Field(description=APP_DESCRIPTION)],
-        target: Annotated[str, Field(description=TARGET_DESCRIPTION)],
+        target: Annotated[str | None, Field(description=TARGET_DESCRIPTION + " Omit for a batch and supply steps.")] = None,
         client: Annotated[str | None, Field(description=CLIENT_DESCRIPTION)] = None,
         session_id: Annotated[str | None, Field(description=SESSION_DESCRIPTION)] = None,
         confirm_dangerous: Annotated[bool, Field(description=CONFIRM_DESCRIPTION)] = False,
+        steps: Annotated[list[str] | None, Field(description=STEPS_DESCRIPTION)] = None,
     ) -> dict:
         return core.click(app, target, cfg, ollama=ollama, client=client, session_id=session_id,
-                          confirm_dangerous=confirm_dangerous)
+                          confirm_dangerous=confirm_dangerous, steps=steps)
 
     @mcp.tool(description=TYPE_DESCRIPTION)
     def type_text(
@@ -109,6 +110,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--ask", metavar="QUESTION", help="run look_at_screen once and print JSON")
     p.add_argument("--app", help="app for --ask")
     p.add_argument("--click", nargs=2, metavar=("APP", "TARGET"), help="click one visible label")
+    p.add_argument("--click-steps", nargs="+", metavar="APP_OR_STEP", help="APP followed by 1 to 10 visible step labels")
     p.add_argument("--type", nargs=3, metavar=("APP", "TARGET", "TEXT"), help="set an editable field value")
     p.add_argument("--confirm-dangerous", action="store_true", help="confirm only after explicit human approval")
     p.add_argument("--client", help="optional client name for screen reading and actions")
@@ -127,6 +129,14 @@ def main(argv: list[str] | None = None) -> None:
         except Exception:
             pass
         print(json.dumps(d, ensure_ascii=False, indent=2))
+    if a.click and a.click_steps is not None:
+        return out(core.click(a.click[0], a.click[1], cfg, steps=a.click_steps[1:],
+                              client=a.client, session_id=a.session_id,
+                              confirm_dangerous=a.confirm_dangerous))
+    if a.click_steps is not None:
+        return out(core.click(a.click_steps[0], cfg=cfg, steps=a.click_steps[1:],
+                              client=a.client, session_id=a.session_id,
+                              confirm_dangerous=a.confirm_dangerous))
     if a.click:
         return out(core.click(*a.click, cfg, client=a.client, session_id=a.session_id,
                               confirm_dangerous=a.confirm_dangerous))

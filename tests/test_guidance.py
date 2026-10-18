@@ -88,5 +88,35 @@ def test_action_guidance_registered_with_explicit_human_confirmation():
         assert props["confirm_dangerous"]["default"] is False
         assert "visible label" in props["target"]["description"].lower()
         assert "refs change" in props["target"]["description"]
-        assert {"app", "target"} <= set(schema["required"])
+        assert "app" in schema["required"]
+        if name == "type_text":
+            assert "target" in schema["required"]
+        else:
+            assert "target" not in schema["required"]
     assert "text" in (getattr(tools["type_text"], "input_schema", None) or tools["type_text"].inputSchema)["required"]
+
+
+
+def test_batch_click_guidance_registered():
+    from mcp_computer_use.guidance import STEPS_DESCRIPTION
+    tools = {tool.name: tool for tool in asyncio.run(server.build_server(Config()).list_tools())}
+    tool = tools["click"]
+    schema = getattr(tool, "input_schema", None) or tool.inputSchema
+    steps = schema["properties"]["steps"]
+    assert steps["default"] is None
+    assert steps["description"] == STEPS_DESCRIPTION
+    assert "10" in STEPS_DESCRIPTION and "safety gate" in STEPS_DESCRIPTION
+    assert "known sequence" in STEPS_DESCRIPTION and "fresh snapshot" in STEPS_DESCRIPTION
+    assert "stops" in STEPS_DESCRIPTION.lower()
+    target = schema["properties"]["target"]
+    assert {"type": "null"} in target["anyOf"]
+    assert "steps" not in (getattr(tools["type_text"], "input_schema", None) or tools["type_text"].inputSchema)["properties"]
+
+
+
+def test_click_schema_requires_only_app_and_lists_steps():
+    tools = {tool.name: tool for tool in asyncio.run(server.build_server(Config()).list_tools())}
+    schema = getattr(tools["click"], "input_schema", None) or tools["click"].inputSchema
+    assert schema["required"] == ["app"]
+    assert "steps" in schema["properties"]
+    assert schema["properties"]["target"]["default"] is None

@@ -476,11 +476,104 @@ def _action(action: str, app: str, target: str, cfg: Config, text: str | None = 
     return finish("done")
 
 
-def click(app: str, target: str, cfg: Config, ollama: OllamaClient | None = None,
-          client: str | None = None, session_id: str | None = None,
-          confirm_dangerous: bool = False) -> dict:
-    return _action("click", app, target, cfg, ollama=ollama, client=client,
-                   session_id=session_id, confirm_dangerous=confirm_dangerous)
+
+def _batch_result(result: dict) -> dict:
+    """Retain every executed step while bounding the ASCII-escaped JSON response."""
+    for _ in range(16):
+        if len(json.dumps(result, indent=2)) < 3000:
+            return result
+        trimmed_candidates = False
+        for step in result["steps"]:
+            if len(step.get("candidates", [])) > 1:
+                step["candidates"].pop()
+                trimmed_candidates = True
+            step.pop("hint", None)
+        result.pop("hint", None)
+        if trimmed_candidates:
+            continue
+
+        def shorten(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key in {"app", "target", "name", "context", "ref", "role", "matched_rule"} and isinstance(item, str):
+                        value[key] = item[:len(item) // 2]
+                    elif isinstance(item, (list, dict)):
+                        shorten(item)
+            elif isinstance(value, list):
+                for item in value:
+                    shorten(item)
+        shorten(result)
+    # The bounded schema (ten steps, at most one failure) fits even when every
+    # display field is empty; keep execution status instead of retrying actions.
+    return result
+
+
+def click(app: str, target: str | None = None, cfg: Config | None = None,
+          ollama: OllamaClient | None = None, client: str | None = None,
+          session_id: str | None = None, confirm_dangerous: bool = False,
+          steps: list[str] | None = None) -> dict:
+    if cfg is None:
+        raise TypeError("cfg is required")
+    t0 = time.monotonic()
+
+    def problem(code: str, message: str, index: int | None = None,
+                offending: str | None = None, rule: str | None = None) -> dict:
+        result = {"ok": False, "action": "click", "app": app[:80] if isinstance(app, str) else "",
+                  "steps": [], "completed": 0,
+                  "duration_seconds": round(time.monotonic() - t0, 2), **error_payload(code, message)}
+        if index is not None:
+            result["step_index"] = index  # zero-based index in the requested sequence
+            result["steps"].append({"target": offending[:200] if isinstance(offending, str) else "",
+                                    "ok": False, **error_payload(code, message)})
+        if rule:
+            result["matched_rule"] = rule[:80]
+        try:
+            hint = safety.log_action(cfg, action="click", app=app, target=offending,
+                                     client=sanitize(client), session_id=sanitize(session_id),
+                                     result="blocked" if rule else "error", confirmed=confirm_dangerous is True,
+                                     error_code=code)
+        except Exception:
+            hint = "Action log unavailable."
+        if hint:
+            result["hint"] = str(hint)[:160]
+        return _batch_result(result)
+
+    if (target is None) == (steps is None):
+        return problem(action_errors.INVALID_TARGET, "Pass exactly one of target or steps.")
+    if steps is None:
+        return _action("click", app, target, cfg, ollama=ollama, client=client,
+                       session_id=session_id, confirm_dangerous=confirm_dangerous)
+    if not isinstance(steps, list) or not 1 <= len(steps) <= 10:
+        return problem(action_errors.INVALID_TARGET, "Pass 1 to 10 steps (max 10 steps).")
+    for index, step in enumerate(steps):
+        if not isinstance(step, str) or not step.strip() or len(step) > 200 or re.fullmatch(r"@e\d+", step.strip()):
+            return problem(action_errors.INVALID_TARGET, "Every step must be a visible label of 1 to 200 characters, not a ref.",
+                           index=index, offending=step)
+    if not isinstance(app, str) or not app.strip() or re.search(r'[&|<>^%"\r\n\x00]', app):
+        return problem(APP_NOT_FOUND, "Pass a non-empty app name without shell metacharacters.")
+    words = safety.blocklist(cfg)
+    rules = [safety.is_dangerous(step, "", words) for step in steps]
+    if confirm_dangerous is not True:
+        for index, rule in enumerate(rules):
+            if rule:
+                return problem(action_errors.DANGEROUS_ACTION_NEEDS_CONFIRMATION,
+                               "This batch needs explicit human confirmation before any step executes.",
+                               index=index, offending=steps[index], rule=rule)
+    result = {"ok": True, "action": "click", "app": app[:80], "steps": [], "completed": 0}
+    for step in steps:
+        outcome = _action("click", app, step, cfg, ollama=ollama, client=client,
+                          session_id=session_id, confirm_dangerous=confirm_dangerous)
+        entry = {"target": step, "ok": outcome["ok"]}
+        for key in ("clicked", "match", "error", "candidates", "would_click", "matched_rule", "hint"):
+            if key in outcome:
+                entry[key] = outcome[key]
+        result["steps"].append(entry)
+        if not outcome["ok"]:
+            result["ok"] = False
+            break
+        result["completed"] += 1
+    result["duration_seconds"] = round(time.monotonic() - t0, 2)
+    return _batch_result(result)
 
 
 def type_text(app: str, target: str, text: str, cfg: Config, ollama: OllamaClient | None = None,
