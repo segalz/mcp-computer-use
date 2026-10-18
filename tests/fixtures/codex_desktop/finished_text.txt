@@ -1,0 +1,14 @@
+Refactor parser
+project-alpha
+Directory: C:\work\project-alpha
+Branch: main
+You said:
+Please refactor the parser module to split monolithic visitor functions.
+I refactored the parser into smaller visitor classes.
+Changed 3 files: parser.py, tokens.py, visitors.py.
+Next step: run the integration tests.
+Copy
+Good response
+Bad response
+Message ChatGPT
+Send

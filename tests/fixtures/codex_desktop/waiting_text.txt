@@ -1,0 +1,13 @@
+Refactor parser
+project-alpha
+Directory: C:\work\project-alpha
+Branch: main
+You said:
+Please refactor the parser module to split monolithic visitor functions.
+I refactored the parser and need to run the test suite to verify the changes.
+Allow command?
+npm test
+Approve
+Deny
+Message ChatGPT
+Send

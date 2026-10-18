@@ -1,0 +1,67 @@
+window "ChatGPT"
+  group "ChatGPT"
+    group
+      group
+        group
+          group
+            group
+              [@e1] textarea "ChatGPT" val="app://-/index.html" id=RootWebArea
+                group
+                  group id=root
+                    group
+                      [@e2] link "Skip to content" val="app://-/index.html#_r_7p_"
+                    group
+                      [@e3] button "Back"
+                    group
+                      [@e4] button "Forward"
+                    group
+                      [@e5] button "Hide sidebar"
+                    menubar "Application menu"
+                      [@e6] menuitem "File" id=application-menu-trigger-file-menu
+                      [@e7] menuitem "Edit" id=application-menu-trigger-edit-menu
+                      [@e8] menuitem "View" id=application-menu-trigger-view-menu
+                      [@e9] menuitem "Help" id=application-menu-trigger-help-menu
+                    group
+                      group "App navigation"
+                        [@e10] button "Home"
+                        [@e11] button "Open profile menu" id=radix-_r_1a_
+                      group "Home"
+                        [@e12] button "Switch mode, current mode: Codex" id=radix-_r_1c_
+                        [@e13] button "New chat"
+                        [@e14] button "Projects"
+                        group
+                          list
+                            [@e15] listitem "project-alpha"
+                              group "project-alpha"
+                                list "Scheduled tasks in project-alpha"
+                                  [@e16] listitem "Refactor parser"
+                                    group
+                                      [@e17] button "Refactor parser"
+                    group id=_r_7p_
+                      group "Thread header"
+                        heading "Refactor parser"
+                        [@e18] button "project-alpha"
+                        [@e19] button "Work in: This computer" id=radix-_r_95_
+                        [@e20] button "Directory: C:\work\project-alpha"
+                        [@e21] button "Branch: main"
+                      group "Conversation"
+                        group "User turn"
+                          statictext "You said:"
+                          statictext "Please refactor the parser module to split monolithic visitor functions."
+                        group "Assistant turn"
+                          statictext "Ran npm test"
+                          statictext "Test suite completed with failures: 2 failed, 10 passed"
+                          statictext "Error: build failed while compiling src/visitors.ts"
+                          statictext "Next step: inspect parser error and update return type definition."
+                          group "Turn actions"
+                            [@e22] button "Copy"
+                            [@e23] button "Good response"
+                            [@e24] button "Bad response"
+                      group "Composer utility bar"
+                        [@e25] textfield "Message ChatGPT" val=""
+                        [@e26] button "Send"
+    group
+      group
+        [@e27] button "Minimise" id=view_1
+        [@e28] button "Restore" id=view_3
+        [@e29] button "Close" id=view_4

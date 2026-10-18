@@ -1,0 +1,11 @@
+Refactor parser
+project-alpha
+Directory: C:\work\project-alpha
+Branch: main
+You said:
+Please refactor the parser module to split monolithic visitor functions.
+Thinking…
+Working on updating AST node visitors and splitting monolithic parse methods...
+Stop
+Message ChatGPT
+Send

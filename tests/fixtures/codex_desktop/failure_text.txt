@@ -1,0 +1,15 @@
+Refactor parser
+project-alpha
+Directory: C:\work\project-alpha
+Branch: main
+You said:
+Please refactor the parser module to split monolithic visitor functions.
+Ran npm test
+Test suite completed with failures: 2 failed, 10 passed
+Error: build failed while compiling src/visitors.ts
+Next step: inspect parser error and update return type definition.
+Copy
+Good response
+Bad response
+Message ChatGPT
+Send

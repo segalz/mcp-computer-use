@@ -1,0 +1,157 @@
+window "ChatGPT"
+  group "ChatGPT"
+    group
+      group
+        group
+          group
+            group
+              [@e1] textarea "ChatGPT" val="app://-/index.html" id=RootWebArea
+                group
+                  group id=root
+                    group
+                      [@e2] link "Skip to content" val="app://-/index.html#_r_7p_"
+                    group
+                      [@e3] button "Back"
+                    group
+                      [@e4] button "Forward"
+                    group
+                      [@e5] button "Hide sidebar"
+                    menubar "Application menu"
+                      [@e6] menuitem "File" id=application-menu-trigger-file-menu
+                      [@e7] menuitem "Edit" id=application-menu-trigger-edit-menu
+                      [@e8] menuitem "View" id=application-menu-trigger-view-menu
+                      [@e9] menuitem "Help" id=application-menu-trigger-help-menu
+                    group
+                      group "App navigation"
+                        [@e10] button "Home"
+                        [@e11] button "Images"
+                        [@e12] button "Scheduled"
+                        [@e13] button "Library"
+                        [@e14] button "Plugins"
+                        [@e15] button "Explore"
+                        [@e16] button "Code Review"
+                        [@e17] button "Sites"
+                        [@e18] button "Open profile menu" id=radix-_r_1a_
+                      group "Home"
+                        [@e19] button "Switch mode, current mode: Codex" id=radix-_r_1c_
+                        [@e20] button "View activity, needs attention" val="unchecked"
+                        group
+                          [@e21] button "Search"
+                        [@e22] button "New chat"
+                        [@e23] button "Projects"
+                        [@e24] button "Project sidebar options" id=radix-_r_1o_
+                        [@e25] button "Add new project"
+                        group
+                          list
+                            [@e26] listitem "project-alpha"
+                              group "project-alpha"
+                                group
+                                  [@e27] button "project-alpha"
+                                    [@e28] button "Project actions for project-alpha" id=radix-_r_22_
+                                    [@e29] button "Start new chat in project-alpha"
+                            [@e30] listitem "project-beta"
+                              group "project-beta"
+                                group
+                                  [@e31] button "project-beta"
+                                    [@e32] button "Project actions for project-beta" id=radix-_r_29_
+                                    [@e33] button "Start new chat in project-beta"
+                                list "Scheduled tasks in project-beta"
+                                  [@e34] listitem "Refactor parser"
+                                    group
+                                      [@e35] button "Refactor parser"
+                                        group
+                                          [@e36] button "Pin chat"
+                                        group
+                                          [@e37] button "Archive chat"
+                                  [@e38] listitem "בדיקת בנייה"
+                                    group
+                                      [@e39] button "בדיקת בנייה"
+                                        group
+                                          [@e40] button "Pin chat"
+                                        group
+                                          [@e41] button "Archive chat"
+                                  [@e42] listitem "Fix login test"
+                                    group
+                                      [@e43] button "Fix login test"
+                                        group
+                                          [@e44] button "Pin chat"
+                                        group
+                                          [@e45] button "Archive chat"
+                            [@e46] listitem "project-gamma"
+                              group "project-gamma"
+                                group
+                                  [@e47] button "project-gamma"
+                                    [@e48] button "Project actions for project-gamma" id=radix-_r_3c_
+                                    [@e49] button "Start new chat in project-gamma"
+                                statictext "No chats"
+                        [@e50] button "Recents"
+                        [@e51] button "Chat sidebar options" id=radix-_r_58_
+                        [@e52] button "New chat"
+                        group
+                          list
+                            [@e53] listitem "בדוק תהליכים פתוחים"
+                              group
+                                [@e54] button "בדוק תהליכים פתוחים"
+                                  group
+                                    [@e55] button "Pin chat"
+                                  group
+                                    [@e56] button "Archive chat"
+                            [@e57] listitem "Try CLI integration"
+                              group
+                                [@e58] button "Try CLI integration"
+                                  group
+                                    [@e59] button "Pin chat"
+                                  group
+                                    [@e60] button "Archive chat"
+                            [@e61] listitem "Fix layout regression"
+                              group
+                                [@e62] button "Fix layout regression"
+                                  group
+                                    [@e63] button "Pin chat"
+                                  group
+                                    [@e64] button "Archive chat"
+                            [@e65] listitem "בדיקת ממשק משתמש"
+                              group
+                                [@e66] button "בדיקת ממשק משתמש"
+                                  group
+                                    [@e67] button "Pin chat"
+                                  group
+                                    [@e68] button "Archive chat"
+                    group
+                      group
+                        group
+                          group
+                            toolbar "Chat toolbar"
+                      [@e69] button "New tab" id=radix-_r_9p_
+                    group id=_r_7p_
+                      group
+                        group
+                          statictext "What should we work on in "
+                          [@e70] button "project-alpha?"
+                        group
+                          group "Composer utility bar"
+                            [@e71] button "Change project: project-alpha"
+                            [@e72] button "Don't work in a project"
+                            [@e73] button "Work in" id=radix-_r_95_
+                              statictext "This computer"
+                          [@e74] textfield "Do anything" val="Do anything\n"
+                            statictext "Do anything"
+                            statictext "\n"
+                          group
+                            [@e75] button "Add files and more"
+                          [@e76] button "Change permissions" id=radix-_r_9k_
+                            statictext "Full access"
+                          group
+                            [@e77] button "GPT-6.1 Sol Medium" id=radix-_r_8q_
+                          group
+                            [@e78] button "Dictate"
+                          group
+                            [@e79] button "Start new voice chat"
+                    group id=DndLiveRegion-2
+                  group id=DndLiveRegion-0
+                  group id=DndLiveRegion-1
+    group
+      group
+        [@e80] button "Minimise" id=view_1
+        [@e81] button "Restore" id=view_3
+        [@e82] button "Close" id=view_4
