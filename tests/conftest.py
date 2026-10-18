@@ -66,6 +66,8 @@ class FakeAgentCu:
         self.texts = texts or {"Claude": CLAUDE_TEXT, "ChatGPT": "Codex\nhello"}
         self.fail = fail  # None | "timeout" | "error"
         self.calls = []
+        self.clicked = {}
+        self.typed = {}
 
     def __call__(self, args, **kw):
         self.calls.append(args[1:])
@@ -86,6 +88,16 @@ class FakeAgentCu:
             if app not in self.snaps:
                 return subprocess.CompletedProcess(args, 1, "", "snapshot unavailable")
             return subprocess.CompletedProcess(args, 0, self.snaps[app], "")
+        if sub == "click":
+            app = args[args.index("-a") + 1]
+            self.clicked.setdefault(app, []).append(args[2])
+            return subprocess.CompletedProcess(args, 0, "clicked", "")
+        if sub == "type":
+            assert args[2] == "-s" and args[6] == "--"
+            assert "--submit" not in args[:7]
+            app = args[args.index("-a") + 1]
+            self.typed.setdefault(app, []).append((args[3], args[7]))
+            return subprocess.CompletedProcess(args, 0, "typed", "")
         raise AssertionError(f"unexpected agent-cu call {args}")
 
 
