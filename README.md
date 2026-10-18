@@ -15,8 +15,8 @@ step, ~3% of a ChatGPT Plus 5-hour quota).
 
 This server does the reading **locally**:
 1. `agent-cu text -a <App>` reads the window (no model).
-2. **Code** extracts only the status and the last message (Claude Desktop has a dedicated extractor; other apps
-   use a generic "last N chars" fallback). ~1.5 s.
+2. **Code** extracts only the status and the last message using specialized per-app extractor profiles
+   (Claude Code, Codex desktop, editor, browser, or generic fallback). ~1.5 s.
 3. A **local Ollama model** (default `gpt-oss:20b`) summarizes that short text. Measured 4–8 s, correct.
 4. The agent receives ~50 tokens of JSON.
 
@@ -134,12 +134,63 @@ mcp-computer-use --click "מחשבון" "7"
 mcp-computer-use --click-steps "מחשבון" "7" "+" "5" "="
 ```
 
-### Details extracted by code
-For Claude (desktop / Claude Code) the server also reads the accessibility tree (`agent-cu snapshot`) and returns
-`details`, filled by code (not the model): `project`, `session` (chat title), `branch`, `folder`, `model`,
-`next_step` (suggestion sentences, English and Hebrew), `failures` (e.g. "Finished a background command (1 failed)"),
-`files` (e.g. a new installer), `background_tasks`, `context_used`, `waiting_for_user` (Allow/Deny buttons).
-Callers can use these directly. Disable the extra snapshot with `MCP_CU_SNAPSHOT_DETAILS=0`.
+### Per-app profiles
+When `look_at_screen` reads a window, it selects a specialized extractor profile based on the application name (`app_name`) and window title (`window_title`). Profiles are evaluated in strict first-match-wins order:
+
+$$\text{claude\_code} \longrightarrow \text{codex\_desktop} \longrightarrow \text{editor} \longrightarrow \text{browser} \longrightarrow \text{generic}$$
+
+1. **`claude_code`**: Matched when `"claude"` is in the lower-cased app name.
+2. **`codex_desktop`**: Matched when the app name is `chatgpt`, `codex`, `codex desktop`, or `openai.codex` (Windows app `ChatGPT`), or when the window title contains `codex`.
+3. **`editor`**: Matched for VS Code-family editors by app name (`code`, `code.exe`, `code - oss`, `code-oss`, `code - insiders`, `cursor`, `antigravity ide`, `windsurf`, `vscodium`), or by window title patterns (` - Visual Studio Code`, ` - Cursor`, ` - Antigravity IDE - `, ` - Windsurf`, ` - VSCodium`, ` - Code - Insiders`).
+4. **`browser`**: Matched for supported browsers by app name (`chrome`, `google chrome`, `msedge`, `edge`, `microsoft edge`, `brave`, `firefox`, `mozilla firefox`) or by window title browser suffixes (` - Google Chrome`, ` - Microsoft Edge`, `microsoft edge`, ` - Mozilla Firefox`, ` - Brave`).
+5. **`generic`**: Default fallback when no specialized profile matches.
+
+#### Output per profile (top-level status & details)
+Every `look_at_screen` call returns a top-level `status` (`working`, `finished`, `waiting`, `error`, or `unknown`) alongside an optional `details` dictionary populated by code (from UI Automation text and accessibility snapshots, without a model; disable extra snapshot inspection with `MCP_CU_SNAPSHOT_DETAILS=0`):
+
+- **Claude Code (`claude_code`)**:
+  - **Top-level `status`**: `working`, `finished`, or `unknown`.
+  - **`details` keys**: `project`, `session` (chat title), `branch`, `folder`, `model`, `files`, `background_tasks`, `context_used`, `waiting_for_user`, `waiting_prompt` (from approval buttons), `failures`, `next_step` (actionable suggestions in English and Hebrew), and `asks_user`.
+- **Codex desktop (`codex_desktop`, Windows app `ChatGPT`)**:
+  - **Top-level `status`**: `working`, `finished`, `waiting`, or `unknown` — determined **strictly from UI controls only** (Stop button, Copy + Good/Bad response buttons, approval dialogs; prose text inside assistant turns is never used as a status signal).
+  - **`details` keys**:
+    - `project`: Project or workspace name (from "What should we work on in...", "Change project: ...", or thread header folder/project controls).
+    - `session`: Chat / thread title (from heading or thread header).
+    - `mode`: Current mode (from "Switch mode, current mode: ...").
+    - `projects`: Sidebar project list (up to 8, corroborated by project action controls).
+    - `recent_chats`: Sidebar recent chat list (up to 5, corroborated by pin/archive controls).
+    - `needs_attention`: Boolean `true` when the "View activity, needs attention" button is visible.
+    - `next_step`: Extracted from "Next steps:" or "השלב הבא:".
+    - `failures`: Error and failure lines detected via `find_failures`.
+    - `waiting_prompt` (and `waiting_for_user=true`): Extracted prompt when waiting for user approval (e.g. "Allow command?", "Approve command?"), corroborated by paired approve/deny buttons.
+- **Editor (`editor`, VS Code / Cursor / Antigravity IDE / Windsurf / VSCodium)**:
+  - **Top-level `status`**: `waiting` if a prompt is pending, `error` if failures are detected, otherwise `unknown`.
+  - **`details` keys**:
+    - `project`: Workspace or project folder name (from window title or Explorer tree section).
+    - `file`: Currently active file (from window title or single active editor tab).
+    - `waiting_prompt` (and `waiting_for_user=true`): Real modal dialog prompts (workspace trust "Do you trust the authors...", extension installation, save confirmations), verified by accompanying dialog action buttons.
+    - `failures`: Diagnostic errors (`Error: ...`, `Exception:`) and error counts from the Problems panel or last terminal run (older output superseded by new shell prompts or subsequent test summaries is automatically discarded).
+    - `next_step`: Actionable next steps found in evidence lines.
+- **Browser (`browser`, Chrome / Edge / Brave / Firefox)**:
+  - **Top-level `status`**: `error` when a network error page is detected (e.g. DNS probe, connection refused, no internet); otherwise `unknown`.
+  - **`details` keys**:
+    - `page_title` (and `title`): Cleaned page title (browser suffixes and Edge profile segments stripped).
+    - `url`: Current page URL from address bar or top text lines.
+    - `tab`: Active tab label (memory usage tags stripped).
+    - `headings`: Up to 5 key page headings extracted from the web content area (`RootWebArea`) or text.
+    - `failures`: Failures and errors within web document content.
+    - `next_step`: Actionable next steps found within document content.
+    - Filters out browser chrome (toolbars, tab strip, address bar, favourites bar) so only web content is extracted.
+- **Generic (`generic`)**:
+  - **Top-level `status`**: Always `unknown`.
+  - **`details` keys**: `failures` (detected from the last 30 lines of extracted tail text, if any).
+
+#### The conservative rule
+All extractors strictly adhere to a conservative principle: return `unknown` status and retain unclassified content rather than guessing or inferring state from ambiguous prose or unstructured text.
+
+#### Limitations
+- **Browser content visibility**: Browsers may expose no page content to UI Automation while the Windows session is locked or the browser window is minimised (accessibility tree only exposes top-level chrome or an empty document area).
+- **Codex desktop thread-state rules**: Thread-state heuristics for Codex desktop were built and validated from synthetic samples and may need tuning against future desktop app updates.
 
 ### Sessions (optional context between calls)
 `client` (e.g. `codex`) and `session_id` (chosen by the client, e.g. `fix-ui`) are **optional**; both are
@@ -338,9 +389,16 @@ Output is UTF-8 (Hebrew titles are kept).
 
 ## Development
 `src/mcp_computer_use/`: `server.py` (MCP + CLI), `core.py` (logic), `agent_cu.py`, `matching.py`, `safety.py`,
-`extractors.py`, `ollama_client.py`, `timeouts.py`, `config.py`, `errors.py`,
+`extractors/` (`registry.py`, `codex_desktop.py`, `browser.py`, `editor.py`, `claude_code.py`, `generic.py`),
+`ollama_client.py`, `timeouts.py`, `config.py`, `errors.py`,
 `guidance.py` (instructions + question validation), `prompts/system_prompt.md`. Tests mock subprocess and Ollama: `pytest -q`. Works with `mcp` 1.x (`FastMCP`)
 and 2.x (`MCPServer`).
+
+### Adding a profile
+To add a new per-app extractor profile:
+1. **Register the profile**: Register via `register_profile(name, matcher, extractor, snapshot_details)` in `src/mcp_computer_use/extractors/registry.py` (and secondary window-title matching in `select_profile` in `src/mcp_computer_use/extractors/__init__.py`).
+2. **Add anonymized fixtures**: Place sanitized accessibility snapshot and text captures under `tests/fixtures/<profile>/` (scrub personal data, usernames, tokens, and local paths).
+3. **Fixture tests**: Add at least 3 fixture tests (≥ 3 fixture tests) covering status detection, details extraction, and fallback/edge cases (e.g. `tests/test_extractor_<profile>.py`).
 
 ## License
 MIT
@@ -361,7 +419,7 @@ MIT
 
 השרת הזה עושה את הקריאה **מקומית**:
 1. ‏`agent-cu text -a <App>` קורא את החלון, בלי מודל.
-2. **קוד** שולף רק את המצב ואת ההודעה האחרונה (יש מחלץ ייעודי ל-Claude Desktop, ולשאר התוכנות לוקחים את N התווים האחרונים). כשנייה וחצי.
+2. **קוד** שולף רק את המצב ואת ההודעה האחרונה באמצעות פרופילים ייעודיים לפי תוכנה (Claude Code, ‏Codex desktop, עורכי קוד, דפדפנים, או ברירת מחדל כללית). כשנייה וחצי.
 3. **מודל מקומי ב-Ollama** (ברירת מחדל `gpt-oss:20b`) מסכם את הטקסט הקצר. נמדד: 4 עד 8 שניות, עם תשובה נכונה.
 4. הסוכן מקבל כ-50 טוקנים של JSON.
 
@@ -479,8 +537,63 @@ mcp-computer-use --click "מחשבון" "7"
 mcp-computer-use --click-steps "מחשבון" "7" "+" "5" "="
 ```
 
-### פרטים שהקוד שולף
-ב-Claude ‏(desktop ו-Claude Code) השרת קורא גם את עץ הנגישות (`agent-cu snapshot`) ומחזיר שדה `details` שממלא הקוד, לא המודל: הפרויקט (`project`), שם הסשן (`session`), הענף (`branch`), התיקייה (`folder`), הצעד הבא שהוצע (`next_step`, באנגלית ובעברית), כשלים כמו פקודת רקע שנכשלה (`failures`), קבצים כמו התקנה חדשה (`files`), משימות רקע (`background_tasks`), וכפתורי אישור שממתינים למשתמש (`waiting_for_user`). אפשר לכבות עם `MCP_CU_SNAPSHOT_DETAILS=0`.
+### פרופילים ייעודיים לפי תוכנה (Per-app profiles)
+בעת קריאת חלון באמצעות `look_at_screen`, השרת מתאים ובוחר פרופיל חילוץ ייעודי לפי שם התוכנה (`app_name`) וכותרת החלון (`window_title`). בדיקת הפרופילים מתבצעת בסדר עדיפויות קפדני (ההתאמה הראשונה שמתקיימת נבחרת):
+
+$$\text{claude\_code} \longrightarrow \text{codex\_desktop} \longrightarrow \text{editor} \longrightarrow \text{browser} \longrightarrow \text{generic}$$
+
+1. **`claude_code`**: נבחר כאשר מחרוזת `"claude"` מופיעה בשם התוכנה (באותיות קטנות).
+2. **`codex_desktop`**: נבחר כאשר שם התוכנה הוא `chatgpt`, `codex`, `codex desktop` או `openai.codex` (אפליקציית Windows של `ChatGPT`), או כאשר כותרת החלון כוללת `codex`.
+3. **`editor`**: נבחר עבור עורכי קוד ממשפחת VS Code לפי שם התוכנה (`code`, `code.exe`, `code - oss`, `code-oss`, `code - insiders`, `cursor`, `antigravity ide`, `windsurf`, `vscodium`), או לפי סיומת ותבנית כותרת החלון (` - Visual Studio Code`, ` - Cursor`, ` - Antigravity IDE - `, ` - Windsurf`, ` - VSCodium`, ` - Code - Insiders`).
+4. **`browser`**: נבחר עבור דפדפנים נתמכים לפי שם התוכנה (Chrome: `chrome`, `google chrome`; Edge: `msedge`, `edge`, `microsoft edge`; Brave: `brave`; Firefox: `firefox`, `mozilla firefox`), או לפי סיומת כותרת החלון (` - Google Chrome`, ` - Microsoft Edge`, `microsoft edge`, ` - Mozilla Firefox`, ` - Brave`).
+5. **`generic`**: ברירת המחדל כאשר אף פרופיל ייעודי אינו מתאים.
+
+#### פלט לפי פרופיל (סטטוס עליון ושדות details)
+כל קריאה ל-`look_at_screen` מחזירה סטטוס עליון (`status`: ‏`working`, `finished`, `waiting`, `error` או `unknown`) יחד עם אובייקט `details` אופציונלי שממולא על ידי קוד (מתוך טקסט הנגישות ועץ ה-snapshot, ללא מודל; לביטול צילום snapshot נוסף: `MCP_CU_SNAPSHOT_DETAILS=0`):
+
+- **Claude Code (`claude_code`)**:
+  - **סטטוס עליון (`status`)**: ‏`working`, `finished` או `unknown`.
+  - **מפתחות `details`**: ‏`project`, שם הסשן (`session`), ענף (`branch`), תיקייה (`folder`), מודל (`model`), קבצים (`files`), משימות רקע (`background_tasks`), ניצול הקשר (`context_used`), כפתורי אישור ממתינים (`waiting_for_user`), שאלת אישור (`waiting_prompt`), כשלים (`failures`), הצעות לצעד הבא באנגלית ובעברית (`next_step`), ושאלות שהסוכן מפנה למשתמש (`asks_user`).
+- **Codex desktop (`codex_desktop`, תוכנת Windows בשם `ChatGPT`)**:
+  - **סטטוס עליון (`status`)**: ‏`working`, `finished`, `waiting` או `unknown` — נקבע **אך ורק מתוך פקדי ממשק (UI controls)** (כפתור Stop, כפתור העתקה Copy יחד עם משוב Good/Bad response, ותיבות אישור; טקסט חופשי בתוך תור העוזר לעולם אינו נחשב כאות סטטוס).
+  - **מפתחות `details`**:
+    - `project`: שם הפרויקט או סביבת העבודה (מתוך "What should we work on in...", "Change project: ...", או מפקדי התיקייה/הפרויקט בכותרת השרשור).
+    - `session`: כותרת השיחה / השרשור (מכותרת ה-heading או כותרת השרשור).
+    - `mode`: מצב עבודה נוכחי (מתוך "Switch mode, current mode: ...").
+    - `projects`: רשימת פרויקטים בסרגל הצד (עד 8, מאומתים מול פקדי פעולות פרויקט).
+    - `recent_chats`: רשימת שיחות אחרונות בסרגל הצד (עד 5, מאומתות מול פקדי נעיצה וארכוב).
+    - `needs_attention`: ערך בוליאני `true` כאשר מופיע כפתור "View activity, needs attention".
+    - `next_step`: נשלף מתוך "Next steps:" או "השלב הבא:".
+    - `failures`: שגיאות וכשלים שזוהו באמצעות `find_failures`.
+    - `waiting_prompt` (ו-`waiting_for_user=true`): שאלת האישור כשהתוכנה ממתינה לאישור משתמש (כגון "Allow command?", "Approve command?"), מאומתת מול צמד כפתורי אישור/דחייה (approve/deny).
+- **Editor (`editor`, עורכי קוד VS Code / Cursor / Antigravity IDE / Windsurf / VSCodium)**:
+  - **סטטוס עליון (`status`)**: ‏`waiting` אם ממתינה שאלת אישור, `error` אם זוהו כשלים, אחרת `unknown`.
+  - **מפתחות `details`**:
+    - `project`: שם התיקייה או הפרויקט (מתוך כותרת החלון או עץ ה-Explorer).
+    - `file`: הקובץ הפעיל (מתוך כותרת החלון או לשונית עורך פעילה יחידה).
+    - `waiting_prompt` (ו-`waiting_for_user=true`): שאלת אישור עבור דיאלוגים אמיתיים (שאלת אמון בספרייה "Do you trust the authors...", התקנת הרחבות, או שמירת קובץ), מאומתת מול כפתורי הפעולה של הדיאלוג.
+    - `failures`: שגיאות ואבחונים (`Error: ...`, `Exception:`) ומספר שגיאות מתוך חלונית Problems או מהרצת הטרמינל האחרונה (פלט ישן שקדם לפקודת מעטפת חדשה או לסיכום בדיקות מאוחר יותר מושמט אוטומטית).
+    - `next_step`: הצעות לצעד הבא מתוך שורות הראיות.
+- **Browser (`browser`, דפדפנים Chrome / Edge / Brave / Firefox)**:
+  - **סטטוס עליון (`status`)**: ‏`error` בעמודי שגיאת רשת (כגון DNS probe, חיבור נדחה, אין אינטרנט); אחרת `unknown`.
+  - **מפתחות `details`**:
+    - `page_title` (ו-`title`): כותרת העמוד נקייה מסיומות דפדפן ומקטעי פרופיל Edge.
+    - `url`: כתובת ה-URL הנוכחית מתוך שורת הכתובות או שורות הטקסט העליונות.
+    - `tab`: כותרת הלשונית הפעילה (ללא תגיות צריכת זיכרון).
+    - `headings`: עד 5 כותרות עמוד מתוך אזור תוכן העמוד (`RootWebArea`) או מהטקסט.
+    - `failures`: שגיאות וכשלים מתוך גוף המסמך.
+    - `next_step`: צעדים הבאים מתוך תוכן העמוד.
+    - מסנן אוטומטית את סרגלי הדפדפן (toolbars, רצועת לשוניות, שורת כתובת, סרגל מועדפים) ומחלץ רק את תוכן עמוד האינטרנט.
+- **Generic (`generic`)**:
+  - **סטטוס עליון (`status`)**: תמיד `unknown`.
+  - **מפתחות `details`**: כשלים (`failures`) שזוהו ב-30 השורות האחרונות של טקסט הסוף הנשלף (אם קיימים).
+
+#### הכלל השמרני (Conservative rule)
+כל המחלצים פועלים לפי עיקרון שמרני מובהק: החזרת סטטוס `unknown` ושמירת תוכן לא מסווג במקום לנחש או להסיק מצב מטקסט חופשי ועמום.
+
+#### הערות מגבלה (Limitations)
+- **חשיפת תוכן בדפדפנים**: דפדפנים עשויים שלא לחשוף תוכן עמוד למנגנון ה-UI Automation כאשר סשן ה-Windows נעול או כשחלון הדפדפן ממוזער (עץ הנגישות חושף במצב זה רק את מעטפת הדפדפן או אזור מסמך ריק).
+- **כללי מצב השרשור ב-Codex desktop**: כללי זיהוי מצב השרשור נבנו ותוקפו על גבי דגימות סינתטיות ועשויים לדרוש כיול והתאמות מול עדכוני גרסה עתידיים של האפליקציה.
 
 ### הפעלה אוטומטית של Ollama
 אם `OLLAMA_URL` מצביע על המחשב הזה (`127.0.0.1` או `localhost`) ו-Ollama לא עונה, השרת מפעיל בעצמו `ollama serve` ברקע, בחלון מוסתר, עם `OLLAMA_HOST=127.0.0.1:<הפורט מ-OLLAMA_URL>` **רק לתהליך הזה**. ה-`OLLAMA_HOST` הגלובלי שלך (למשל ה-Mac) לא משתנה. אחר כך הוא מחכה עד 10 שניות ש-`/api/tags` יענה.
@@ -581,6 +694,15 @@ powershell -ExecutionPolicy Bypass -File C:\Develop\mcp-computer-use\scripts\cu-
 - `look_at_screen("Is Claude finished?", "Claude")`
 - `click("מחשבון", steps=["7", "+", "5", "="])`
 - `type_text("מחשבון", "שדה הזנה", "100")`
+
+## פיתוח
+מבנה הקבצים ב-`src/mcp_computer_use/`: `server.py` (שרת MCP ו-CLI), `core.py` (לוגיקה ראשית), `agent_cu.py`, `matching.py`, `safety.py`, חבילת `extractors/` (`registry.py`, `codex_desktop.py`, `browser.py`, `editor.py`, `claude_code.py`, `generic.py`), `ollama_client.py`, `timeouts.py`, `config.py`, `errors.py`, `guidance.py`, `prompts/system_prompt.md`. הרצת בדיקות עם `pytest -q`. תומך ב-`mcp` 1.x ו-2.x.
+
+### הוספת פרופיל חדש (Adding a profile)
+כדי להוסיף פרופיל מחלץ עבור אפליקציה חדשה:
+1. **רישום הפרופיל**: רושמים באמצעות `register_profile(name, matcher, extractor, snapshot_details)` בקובץ `src/mcp_computer_use/extractors/registry.py` (והתאמה משנית לפי כותרת חלון ב-`select_profile` ב-`src/mcp_computer_use/extractors/__init__.py`).
+2. **הוספת קובצי בדיקה (fixtures)**: מוסיפים צילומי snapshot וטקסט אנונימיים תחת `tests/fixtures/<profile>/` (ללא מידע אישי, שמות משתמש, טוקנים או נתיבים מקומיים).
+3. **בדיקות מבוססות fixtures**: כותבים לפחות 3 בדיקות (≥ 3 fixture tests) המאמתות זיהוי סטטוס, חילוץ שדות details ומקרי קצה (לדוגמה `tests/test_extractor_<profile>.py`).
 
 ## רישיון
 MIT
