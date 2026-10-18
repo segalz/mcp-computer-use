@@ -12,7 +12,8 @@ from . import errors as action_errors
 from .config import Config
 from .errors import CuError, APP_NOT_FOUND, QUESTION_TOO_LONG, EMPTY_QUESTION, error_payload
 from .guidance import question_hints
-from .extractors import extract, select_profile, wants_snapshot
+from .extractors import extract, parse_snapshot, select_profile, wants_snapshot
+from .extractors.browser import is_browser_app
 from .sessions import Session, sanitize
 from . import memory
 from . import autostart
@@ -59,6 +60,9 @@ def _stateless_hint(client: str | None, cfg: Config) -> bool:
     return last is not None and now - last <= cfg.stateless_hint_window
 
 
+BROWSER_SNAPSHOT_RETRY_DELAY = 0.5  # seconds before the single browser snapshot retry
+
+
 def look_at_screen(question: str, app: str | None, cfg: Config,
                    ollama: OllamaClient | None = None,
                    client: str | None = None, session_id: str | None = None,
@@ -102,15 +106,22 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
             target = chosen.name
         raw = agent_cu.window_text(target, cfg.agent_cu_cmd, cfg.agent_cu_timeout)
         snapshot = None
-        if cfg.snapshot_details and wants_snapshot(target):
+        # callers may pass a full window title ("<page> - Google Chrome") as the app;
+        # the title is used for browser detection only
+        browser = select_profile(target) == "browser" or is_browser_app(target, window_title=target)
+        if cfg.snapshot_details and (wants_snapshot(target) or browser):
             # browser page content lives outside the interactive (-i) tree; the full tree is slower
-            browser = select_profile(target) == "browser"
             snap_timeout = cfg.agent_cu_timeout * 2 if browser else cfg.agent_cu_timeout
             try:
                 snapshot = agent_cu.window_snapshot(target, cfg.agent_cu_cmd, snap_timeout,
                                                     interactive=not browser)
+                if browser and "RootWebArea" not in snapshot:
+                    # Chrome builds the web tree lazily; right after launch it can be missing
+                    time.sleep(BROWSER_SNAPSHOT_RETRY_DELAY)
+                    snapshot = agent_cu.window_snapshot(target, cfg.agent_cu_cmd, snap_timeout,
+                                                        interactive=False)
             except CuError:
-                snapshot = None  # details are a bonus; the text answer still works
+                snapshot = snapshot or None  # details are a bonus; the text answer still works
     except CuError as e:
         if e.code == APP_NOT_FOUND and available is None:
             try:
@@ -121,7 +132,12 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
                                   model_used=cfg.model, duration_seconds=elapsed()))
 
     # 2) code-based extraction (no model)
-    ex = extract(raw, target, cfg.max_chars, cfg.generic_tail_chars, snapshot=snapshot)
+    has_window = bool(snapshot) and any(role == "window" for _, role, _ in parse_snapshot(snapshot))
+    if browser and not has_window:
+        ex = extract(raw, target, cfg.max_chars, cfg.generic_tail_chars, snapshot=snapshot,
+                     window_title=target)
+    else:
+        ex = extract(raw, target, cfg.max_chars, cfg.generic_tail_chars, snapshot=snapshot)
     details = {k: v for k, v in ex.details.items() if v not in (None, "", [], False)}
     detected = ex.status
     if details.get("waiting_for_user") and detected != "working":

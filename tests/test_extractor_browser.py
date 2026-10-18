@@ -380,3 +380,111 @@ def test_core_browser_full_snapshot_gets_double_timeout(cfg, fake_cu, monkeypatc
     core.look_at_screen("What is shown?", "Claude", cfg, make_ollama(cfg))
     assert seen["Google Chrome"] == cfg.agent_cu_timeout * 2
     assert seen["Claude"] == cfg.agent_cu_timeout
+
+
+CHROME_TITLE = "Build dashboard - Example - Google Chrome"
+
+
+def test_core_window_title_target_gets_browser_full_snapshot(cfg, fake_cu, monkeypatch):
+    from conftest import make_ollama
+    from mcp_computer_use import core
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    fake_cu.texts[CHROME_TITLE] = fixture("chrome_dashboard_text.txt")
+    fake_cu.snaps[CHROME_TITLE] = fixture("chrome_dashboard_snapshot.txt")
+    sent = []
+    res = core.look_at_screen("Which tests failed?", CHROME_TITLE, cfg, make_ollama(cfg, record=sent))
+    snaps = [c for c in fake_cu.calls if c[:1] == ["snapshot"]]
+    assert snaps == [["snapshot", "-a", CHROME_TITLE, "-c", "--human"]]
+    fails = res["details"]["failures"]
+    assert "test_parse_unicode - failed" in fails and "test_parse_large - failed" in fails
+    prompt = sent[0]["messages"][1]["content"]
+    assert "test_parse_unicode" in prompt and "test_parse_large" in prompt
+
+
+def test_core_browser_snapshot_without_web_area_retries_once(cfg, fake_cu, monkeypatch):
+    from conftest import make_ollama
+    from mcp_computer_use import agent_cu, core
+    slept = []
+    monkeypatch.setattr(core.time, "sleep", slept.append)
+    results = ['[@e1] window "Build dashboard - Example - Google Chrome"\n  [@e2] button "Back"',
+               fixture("chrome_dashboard_snapshot.txt")]
+    calls = []
+
+    def fake_snapshot(app, cmd="agent-cu", timeout=20.0, interactive=True):
+        calls.append(interactive)
+        return results[len(calls) - 1]
+
+    monkeypatch.setattr(agent_cu, "window_snapshot", fake_snapshot)
+    fake_cu.texts[CHROME_TITLE] = fixture("chrome_dashboard_text.txt")
+    sent = []
+    res = core.look_at_screen("Which tests failed?", CHROME_TITLE, cfg, make_ollama(cfg, record=sent))
+    assert calls == [False, False]
+    assert slept == [core.BROWSER_SNAPSHOT_RETRY_DELAY]
+    assert "test_parse_large - failed" in res["details"]["failures"]
+    assert "test_parse_unicode" in sent[0]["messages"][1]["content"]
+
+
+def test_core_title_check_keeps_non_browser_targets(cfg, fake_cu):
+    from conftest import make_ollama
+    from mcp_computer_use import core
+    fake_cu.texts["Notepad"] = "some notes"
+    fake_cu.snaps["Notepad"] = '  [@e1] button "OK"'
+    core.look_at_screen("What is shown?", "Notepad", cfg, make_ollama(cfg))
+    assert not any(c[:1] == ["snapshot"] for c in fake_cu.calls)
+
+    fake_cu.calls.clear()
+    fake_cu.texts["Claude"] = "hello"
+    fake_cu.snaps["Claude"] = '  [@e1] button "OK"'
+    core.look_at_screen("What is shown?", "Claude", cfg, make_ollama(cfg))
+    assert [c for c in fake_cu.calls if c[:1] == ["snapshot"]] == [["snapshot", "-a", "Claude", "-i", "-c", "--human"]]
+
+
+@pytest.mark.parametrize("app", ["notes about codex - Notepad", "main.py - Visual Studio Code"])
+def test_core_non_browser_title_like_app_keeps_pre_change_behavior(cfg, fake_cu, monkeypatch, app):
+    from conftest import make_ollama
+    from mcp_computer_use import core
+    seen = []
+    real = core.extract
+
+    def spy(*a, **kw):
+        ex = real(*a, **kw)
+        seen.append((kw.get("window_title"), ex.extractor))
+        return ex
+
+    monkeypatch.setattr(core, "extract", spy)
+    fake_cu.texts[app] = "some notes"
+    fake_cu.snaps[app] = '  [@e1] button "OK"'
+    core.look_at_screen("What is shown?", app, cfg, make_ollama(cfg))
+    assert not any(c[:1] == ["snapshot"] for c in fake_cu.calls)
+    assert seen == [(None, "generic")]
+
+
+def test_core_browser_retry_error_keeps_first_snapshot(cfg, fake_cu, monkeypatch):
+    from conftest import make_ollama
+    from mcp_computer_use import agent_cu, core
+    from mcp_computer_use.errors import CuError
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    first = '[@e1] window "Build dashboard - Example - Google Chrome"\n  [@e2] button "Back"'
+    calls = []
+
+    def fake_snapshot(app, cmd="agent-cu", timeout=20.0, interactive=True):
+        calls.append(interactive)
+        if len(calls) == 1:
+            return first
+        raise CuError("AGENT_CU_FAILED", "boom")
+
+    seen = []
+    real = core.extract
+
+    def spy(*a, **kw):
+        ex = real(*a, **kw)
+        seen.append((kw.get("snapshot"), ex.extractor))
+        return ex
+
+    monkeypatch.setattr(agent_cu, "window_snapshot", fake_snapshot)
+    monkeypatch.setattr(core, "extract", spy)
+    fake_cu.texts[CHROME_TITLE] = fixture("chrome_dashboard_text.txt")
+    res = core.look_at_screen("Which tests failed?", CHROME_TITLE, cfg, make_ollama(cfg))
+    assert "error" not in res
+    assert calls == [False, False]
+    assert seen == [(first, "browser")]
