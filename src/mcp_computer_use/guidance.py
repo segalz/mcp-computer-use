@@ -29,6 +29,7 @@ Ask ONE short English question about what a window on this computer shows; get s
 `details` is filled by code: project, session, branch, next_step, failures, files, background_tasks when found.
 Read-only: never clicks or types. Pass `app` when known. For multi-part checks call step by step
 (status first, then details). On `error`, follow `error.suggestion`.
+`include_image` (optional bool): also return a window JPEG (images cost thousands of tokens; request only when text is not enough).
 `client` and `session_id` are OPTIONAL. Without them every call is independent: the full screen is
 re-read, no 'what changed' is possible and no file is written. With them the server keeps context
 between calls (more accurate, shorter answers, plus `changed_since_last`). Reuse the same pair for one
@@ -61,6 +62,11 @@ CLIENT_DESCRIPTION = ("Optional. Your client name, e.g. 'codex' or 'claude' ([A-
 SESSION_DESCRIPTION = ("Optional. A session name you choose, e.g. 'fix-ui' ([A-Za-z0-9_-], max 64). Reuse it on "
                        "every call of the same task to get context and 'changed_since_last'. A new value replaces "
                        "your previous session. Omit it and each call is independent (full re-read, no file).")
+IMAGE_DESCRIPTION = (
+    "Optional. Also return a downscaled JPEG of the target window (max 1024 px wide). "
+    "Images cost thousands of tokens — request one only when text is not enough "
+    "(layout, charts, visual glitches). Default false."
+)
 
 HINT_MULTIPART = ("This looks like several questions in one; for best results call look_at_screen "
                   "step by step, one focused question per call (status first, then details).")

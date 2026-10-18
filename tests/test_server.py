@@ -23,3 +23,13 @@ def test_health_http(monkeypatch):
             assert r.status == 200 and json.loads(r.read())["ok"] is True
     finally:
         httpd.shutdown()
+
+
+def test_look_at_screen_tool_unstructured_schema():
+    mcp = server.build_server(Config())
+    tools = asyncio.run(mcp.list_tools())
+    look = next(t for t in tools if t.name == "look_at_screen")
+    assert look.output_schema is None
+    schema = getattr(look, "input_schema", None) or getattr(look, "inputSchema")
+    assert "include_image" in schema["properties"]
+    assert schema["properties"]["include_image"]["default"] is False

@@ -394,3 +394,86 @@ def test_capture_window_bad_metadata_dimensions(bad_meta):
 
     assert exc_info.value.code == errors.IMAGE_CAPTURE_FAILED
     assert "Invalid dimension" in str(exc_info.value)
+
+
+def test_cu_capture_script_browser_aliases_and_ordinal_rules():
+    """Verify cu_capture.ps1 defines required browser process aliases and ordinal comparison."""
+    script_path = get_script_path()
+    content = script_path.read_text(encoding="utf-8")
+
+    # Browser process aliases must be present
+    assert '"Google Chrome" = "chrome"' in content or "'Google Chrome' = 'chrome'" in content
+    assert '"Microsoft Edge" = "msedge"' in content or "'Microsoft Edge' = 'msedge'" in content
+
+    # Suffix check must use ordinal comparison, never wildcard/regex
+    assert "EndsWith($suffix, [System.StringComparison]::Ordinal)" in content
+    assert "IMAGE_CAPTURE_FAILED" in content
+    assert "Ambiguous window" in content
+    assert "Window not found" in content
+    assert "StartsWith" not in content
+    assert "$matches" not in content
+
+
+def test_window_title_candidate_matching_pure_python():
+    """Pure Python unit test validating the candidate matching rules from the spec."""
+    def match_candidate(title: str, target_name: str) -> bool:
+        clean = title.rstrip("\u200b\ufeff \t")
+        suffix = " - " + target_name
+        if clean.endswith(suffix):
+            return True
+        if clean == target_name:
+            return True
+        return False
+
+    # Chrome titles
+    assert match_candidate("GitHub - Google Chrome", "Google Chrome")
+    assert match_candidate("New Tab - Google Chrome", "Google Chrome")
+    assert match_candidate("Google Chrome", "Google Chrome")
+    assert match_candidate("Google Chrome\u200b", "Google Chrome")
+
+    # Edge titles with profile segment
+    assert match_candidate("Page - Profile 1 - Microsoft Edge", "Microsoft Edge")
+    assert match_candidate("Dashboard - Personal - Microsoft Edge", "Microsoft Edge")
+    assert match_candidate("New Tab - Microsoft Edge", "Microsoft Edge")
+    assert match_candidate("Microsoft Edge\u200b", "Microsoft Edge")
+
+    # Negative matches
+    assert not match_candidate("Microsoft Edge - Profile 1", "Microsoft Edge")
+    assert not match_candidate("Calculator - notes.txt - Notepad", "Calculator")
+    assert not match_candidate("Page - Firefox", "Google Chrome")
+    assert not match_candidate("Notepad - Document", "Microsoft Edge")
+    assert not match_candidate("Google Chrome Helper", "Google Chrome")
+
+
+def test_capture_window_browser_app_error_messages():
+    """Verify subprocess errors for browser app lookups map to CuError(IMAGE_CAPTURE_FAILED)."""
+    cfg = Config()
+
+    # Window not found
+    def fake_not_found(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout=json.dumps({"ok": False, "code": errors.IMAGE_CAPTURE_FAILED, "message": "Window not found: Google Chrome"}),
+        )
+
+    with patch("subprocess.run", side_effect=fake_not_found):
+        with pytest.raises(CuError) as exc_info:
+            capture_window("Google Chrome", cfg)
+        assert exc_info.value.code == errors.IMAGE_CAPTURE_FAILED
+        assert "Window not found: Google Chrome" in exc_info.value.message
+
+    # Ambiguous window
+    def fake_ambiguous(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout=json.dumps({"ok": False, "code": errors.IMAGE_CAPTURE_FAILED, "message": "Ambiguous window for 'Google Chrome' (2 windows found)"}),
+        )
+
+    with patch("subprocess.run", side_effect=fake_ambiguous):
+        with pytest.raises(CuError) as exc_info:
+            capture_window("Google Chrome", cfg)
+        assert exc_info.value.code == errors.IMAGE_CAPTURE_FAILED
+        assert "Ambiguous window" in exc_info.value.message
+

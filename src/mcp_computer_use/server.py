@@ -6,41 +6,81 @@ import json
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 try:  # mcp 1.x
-    from mcp.server.fastmcp import FastMCP as _Server
+    from mcp.server.fastmcp import FastMCP as _Server, Image
 except ImportError:  # mcp 2.x renamed FastMCP -> MCPServer
-    from mcp.server.mcpserver import MCPServer as _Server
+    from mcp.server.mcpserver import MCPServer as _Server, Image
 
 from typing import Annotated
 
 from pydantic import Field
 
-from . import core
+from . import core, imaging, errors
+from .errors import CuError
 from .guidance import (INSTRUCTIONS, LOOK_DESCRIPTION, HEALTH_DESCRIPTION,
                        QUESTION_DESCRIPTION, APP_DESCRIPTION, CLIENT_DESCRIPTION, SESSION_DESCRIPTION,
                        RELEASE_DESCRIPTION, KEEP_WARM_DESCRIPTION, PING_DESCRIPTION,
-                       CLICK_DESCRIPTION, TYPE_DESCRIPTION, TARGET_DESCRIPTION, TEXT_DESCRIPTION, CONFIRM_DESCRIPTION, STEPS_DESCRIPTION)
+                       CLICK_DESCRIPTION, TYPE_DESCRIPTION, TARGET_DESCRIPTION, TEXT_DESCRIPTION, CONFIRM_DESCRIPTION, STEPS_DESCRIPTION,
+                       IMAGE_DESCRIPTION)
 from .memory import MemoryWatcher
 from .ollama_client import OllamaClient
 from .config import Config, load_config
 
 
 
+def capture_image_for_look(
+    res: dict,
+    app: str | None,
+    cfg: Config,
+) -> tuple[bytes | None, dict]:
+    """Resolve target window title, attempt capture, and populate res with image or image_error."""
+    if res.get("error"):
+        return None, res
+
+    windows_seen = res.get("windows_seen")
+    title = (windows_seen[0] if windows_seen and isinstance(windows_seen, list) and windows_seen[0] else None) or app
+    if not title:
+        res["image_error"] = errors.error_payload(
+            errors.IMAGE_CAPTURE_FAILED, "No target window resolved for image capture"
+        )["error"]
+        return None, res
+
+    try:
+        jpeg_bytes, meta = imaging.capture_window(title, cfg)
+        res["image"] = meta
+        return jpeg_bytes, res
+    except CuError as exc:
+        res["image_error"] = errors.error_payload(exc.code, exc.message)["error"]
+        return None, res
+    except Exception as exc:
+        res["image_error"] = errors.error_payload(errors.IMAGE_CAPTURE_FAILED, str(exc))["error"]
+        return None, res
+
+
 def build_server(cfg: Config, ollama: OllamaClient | None = None) -> _Server:
     ollama = ollama if ollama is not None else OllamaClient(cfg)
     mcp = _Server("mcp-computer-use", instructions=INSTRUCTIONS)
 
-    @mcp.tool(description=LOOK_DESCRIPTION)
+    @mcp.tool(description=LOOK_DESCRIPTION, structured_output=False)
     def look_at_screen(
         question: Annotated[str, Field(description=QUESTION_DESCRIPTION)],
         app: Annotated[str | None, Field(description=APP_DESCRIPTION)] = None,
         client: Annotated[str | None, Field(description=CLIENT_DESCRIPTION)] = None,
         session_id: Annotated[str | None, Field(description=SESSION_DESCRIPTION)] = None,
         keep_warm: Annotated[bool, Field(description=KEEP_WARM_DESCRIPTION)] = False,
+        include_image: Annotated[bool, Field(description=IMAGE_DESCRIPTION)] = False,
     ) -> dict:
-        return core.look_at_screen(question, app, cfg, ollama=ollama, client=client, session_id=session_id,
+        res = core.look_at_screen(question, app, cfg, ollama=ollama, client=client, session_id=session_id,
                                    keep_warm=bool(keep_warm))
+        if not include_image:
+            return res
+
+        jpeg_bytes, res = capture_image_for_look(res, app, cfg)
+        if jpeg_bytes is not None:
+            return [res, Image(data=jpeg_bytes, format="jpeg")]
+        return res
 
     @mcp.tool(description=CLICK_DESCRIPTION)
     def click(
@@ -119,7 +159,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--ping", action="store_true", help="heartbeat: server + Ollama (auto-start) + model 'pong'")
     p.add_argument("--release", action="store_true", help="unload the model now and print freed memory")
     p.add_argument("--health-http", action="store_true", help="also serve GET /health over HTTP")
+    p.add_argument("--image-out", metavar="PATH", help="with --ask: capture window image to PATH and add image/image_error to JSON")
     a = p.parse_args(argv)
+    if a.image_out and not a.ask:
+        p.error("--image-out requires --ask")
     cfg = load_config(a.config)
     if a.health_http:
         cfg.health_http = True
@@ -146,8 +189,20 @@ def main(argv: list[str] | None = None) -> None:
     if a.health:
         return out(core.health(cfg))
     if a.ask:
-        return out(core.look_at_screen(a.ask, a.app, cfg, client=a.client, session_id=a.session_id,
-                                            keep_warm=a.keep_warm))
+        d = core.look_at_screen(a.ask, a.app, cfg, client=a.client, session_id=a.session_id,
+                                keep_warm=a.keep_warm)
+        if a.image_out:
+            jpeg_bytes, d = capture_image_for_look(d, a.app, cfg)
+            if jpeg_bytes is not None:
+                try:
+                    Path(a.image_out).write_bytes(jpeg_bytes)
+                except Exception as exc:
+                    d.pop("image", None)
+                    d["image_error"] = errors.error_payload(
+                        errors.IMAGE_CAPTURE_FAILED,
+                        f"could not write image file: {type(exc).__name__}",
+                    )["error"]
+        return out(d)
     if a.ping:
         return out(core.ping(cfg))
     if a.release:

@@ -95,7 +95,12 @@ namespace McpComputerUse {
     $rawBytes = [System.Convert]::FromBase64String($TitleB64)
     $targetTitle = [System.Text.Encoding]::UTF8.GetString($rawBytes)
 
-    # 3. Window lookup: EnumWindows + exact title equality (-ceq), visible top-level windows; fallback to process name main window
+    # 3. Window lookup:
+    #    Step 1: EnumWindows exact title equality (-ceq), visible top-level windows
+    #    Step 2: Fallback to process name main window (with browser aliases)
+    #    Step 3: Fallback to unique visible, non-minimised top-level window whose title ends with " - <name>"
+    #            or equals <name> ignoring trailing zero-width space / profile segment
+    $visibleWindows = [System.Collections.Generic.List[PSCustomObject]]::new()
     $matchingWindows = [System.Collections.Generic.List[IntPtr]]::new()
     $enumCallback = [McpComputerUse.Win32+EnumWindowsProc]{
         param($hWnd, $lParam)
@@ -108,6 +113,7 @@ namespace McpComputerUse {
                 if ($title -ceq $targetTitle) {
                     $matchingWindows.Add($hWnd)
                 }
+                $visibleWindows.Add([PSCustomObject]@{ Handle = $hWnd; Title = $title })
             }
         }
         return $true
@@ -116,6 +122,7 @@ namespace McpComputerUse {
 
     $targetHwnd = [IntPtr]::Zero
 
+    # Step 1: exact title match
     if ($matchingWindows.Count -gt 0) {
         # Check for non-minimized window first
         foreach ($h in $matchingWindows) {
@@ -129,9 +136,18 @@ namespace McpComputerUse {
             [PSCustomObject]@{ ok = $false; code = "IMAGE_WINDOW_MINIMIZED"; message = "Target window is minimized" } | ConvertTo-Json -Compress
             exit 0
         }
-    } else {
-        # Fallback to process name main window only if no title match
+    }
+
+    # Step 2: process name fallback with aliases
+    if ($targetHwnd -eq [IntPtr]::Zero) {
+        $procAliases = @{
+            "Google Chrome" = "chrome"
+            "Microsoft Edge" = "msedge"
+        }
         $procName = $targetTitle -replace '(?i)\.exe$', ''
+        if ($procAliases.ContainsKey($procName)) {
+            $procName = $procAliases[$procName]
+        }
         $escapedProc = [WildcardPattern]::Escape($procName)
         $procs = @(Get-Process -Name $escapedProc -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -ceq $procName })
         if ($procs.Count -eq 0) {
@@ -149,7 +165,31 @@ namespace McpComputerUse {
                 }
             }
         }
-        if ($targetHwnd -eq [IntPtr]::Zero) {
+    }
+
+    # Step 3: unique visible, non-minimised top-level window whose title ends with " - <name>"
+    #         or equals <name> ignoring trailing zero-width space / profile segment
+    if ($targetHwnd -eq [IntPtr]::Zero) {
+        $suffix = " - " + $targetTitle
+        $candidates = [System.Collections.Generic.List[IntPtr]]::new()
+        foreach ($win in $visibleWindows) {
+            $h = $win.Handle
+            if (-not [McpComputerUse.Win32]::IsIconic($h)) {
+                $rawTitle = $win.Title
+                # Strip trailing zero-width spaces (\u200B, \uFEFF) and whitespace
+                $clean = $rawTitle.TrimEnd([char[]]@([char]0x200B, [char]0xFEFF, ' ', "`t"))
+                $isMatch = $clean.EndsWith($suffix, [System.StringComparison]::Ordinal) -or
+                           $clean.Equals($targetTitle, [System.StringComparison]::Ordinal)
+                if ($isMatch) {
+                    $candidates.Add($h)
+                }
+            }
+        }
+        if ($candidates.Count -eq 1) {
+            $targetHwnd = $candidates[0]
+        } elseif ($candidates.Count -gt 1) {
+            throw [Exception]"Ambiguous window for '$targetTitle' ($($candidates.Count) windows found)"
+        } else {
             throw [Exception]"Window not found: $targetTitle"
         }
     }
