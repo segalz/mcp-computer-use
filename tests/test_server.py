@@ -6,11 +6,11 @@ from mcp_computer_use import server, core
 from mcp_computer_use.config import Config
 
 
-def test_tools_registered_read_only():
+def test_tools_registered():
     mcp = server.build_server(Config())
     tools = asyncio.run(mcp.list_tools())
     names = sorted(t.name for t in tools)
-    assert names == ["health", "look_at_screen", "ping", "release_model"]  # no click/type tools
+    assert names == ["click", "health", "look_at_screen", "ping", "release_model", "type_text"]
 
 
 def test_health_http(monkeypatch):

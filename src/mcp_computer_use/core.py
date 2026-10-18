@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from importlib import resources
 from pathlib import Path
 
-from . import agent_cu
+from . import agent_cu, matching, safety
+from . import errors as action_errors
 from .config import Config
 from .errors import CuError, APP_NOT_FOUND, QUESTION_TOO_LONG, EMPTY_QUESTION, error_payload
 from .guidance import question_hints
@@ -297,3 +299,192 @@ def health(cfg: Config, ollama: OllamaClient | None = None) -> dict:
         out["problems"].append(f"'{cfg.agent_cu_cmd}' not on PATH (npm i -g agent-cu)")
     out["ok"] = out["ollama_reachable"] and out["model_present"] and out["agent_cu_available"]
     return out
+
+
+_EDITABLE_ROLES = {"textfield", "textarea", "edit", "combobox", "textbox", "document", "searchfield"}
+_ACTION_CODES = {
+    action_errors.AGENT_CU_FAILED, action_errors.AGENT_CU_NOT_INSTALLED,
+    APP_NOT_FOUND, action_errors.INVALID_TARGET, action_errors.TEXT_TOO_LONG,
+    action_errors.TARGET_NOT_FOUND, action_errors.TARGET_AMBIGUOUS,
+    action_errors.TARGET_NOT_EDITABLE, action_errors.DANGEROUS_ACTION_NEEDS_CONFIRMATION,
+}
+
+
+def _action_element(element: agent_cu.Element, context: bool = False) -> dict:
+    result = {"ref": element.ref[:40], "name": element.name[:80], "role": element.role[:32]}
+    if context:
+        result["context"] = element.context[:40]
+    return result
+
+
+def _action_result(result: dict, text: str | None) -> dict:
+    """Apply the audit logger's text-scrubbing policy to result strings as well."""
+    needles = safety._build_needles(text) if text else set()
+
+    def scrub(value):
+        if isinstance(value, str):
+            return safety._scrub_value(value, needles)
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        if isinstance(value, dict):
+            return {key: scrub(item) for key, item in value.items()}
+        return value
+
+    result = scrub(result)
+    # Use the larger ASCII-escaped encoding as the budget, including JSON spaces.
+    for _ in range(16):
+        if len(json.dumps(result, indent=2)) < 1500:
+            return result
+        if len(result.get("candidates", [])) > 1:
+            result["candidates"].pop()
+            continue
+        if "hint" in result:
+            result.pop("hint")
+            continue
+
+        def shorten(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key in {"app", "name", "context", "ref", "role", "matched_rule"} and isinstance(item, str):
+                        value[key] = item[:len(item) // 2]
+                    elif isinstance(item, (list, dict)):
+                        shorten(item)
+            elif isinstance(value, list):
+                for item in value:
+                    shorten(item)
+        shorten(result)
+    # Defensive fallback for unexpected, untrimmable fields; preserve whether
+    # the action completed so an already-executed action is not reported failed.
+    fallback = {"ok": result.get("ok") is True,
+                "action": "type" if result.get("action") == "type" else "click",
+                "app": "", "hint": "Action response details omitted."}
+    if not fallback["ok"]:
+        code = result.get("error", {}).get("code")
+        code = code if code in _ACTION_CODES else action_errors.AGENT_CU_FAILED
+        fallback.update(error_payload(code, "Action response details omitted."))
+    return scrub(fallback)
+
+
+def _action(action: str, app: str, target: str, cfg: Config, text: str | None = None,
+            ollama: OllamaClient | None = None, client: str | None = None,
+            session_id: str | None = None, confirm_dangerous: bool = False) -> dict:
+    t0 = time.monotonic()
+    selected = None
+    method = None
+    confirmed = confirm_dangerous is True
+    private_text = text if action == "type" and isinstance(text, str) else None
+    client_c, sid = sanitize(client), sanitize(session_id)
+
+    def finish(state: str, code: str | None = None, message: str = "", **extra) -> dict:
+        result = {"ok": code is None, "action": action,
+                  "app": app[:80] if isinstance(app, str) else "",
+                  "duration_seconds": round(time.monotonic() - t0, 2)}
+        if code:
+            result.update(error_payload(code, message))
+        else:
+            result["clicked" if action == "click" else "typed_into"] = _action_element(selected)
+            result["match"] = method
+            if action == "type":
+                result["chars"] = len(text)
+        result.update(extra)
+        try:
+            hint = safety.log_action(
+                cfg, text=private_text, client=client_c, session_id=sid, app=app,
+                action=action, target=target, ref=selected.ref if selected else None,
+                name=selected.name if selected else None, role=selected.role if selected else None,
+                result=state, confirmed=confirmed, error_code=code,
+                text_len=len(private_text) if private_text is not None else None,
+            )
+        except Exception:
+            hint = "Action log unavailable."
+        if hint:
+            result["hint"] = str(hint)[:160]
+        return _action_result(result, private_text)
+
+    def blocked(rule: str) -> dict:
+        would_click = (_action_element(selected) if selected else
+                       {"ref": None, "name": target[:80], "role": None})
+        return finish("blocked", action_errors.DANGEROUS_ACTION_NEEDS_CONFIRMATION,
+                      "This action needs explicit human confirmation.",
+                      would_click=would_click, matched_rule=rule[:80])
+
+    if not isinstance(target, str) or not target.strip() or len(target) > 200 or re.fullmatch(r"@e\d+", target.strip()):
+        return finish("error", action_errors.INVALID_TARGET, "Pass a visible label of 1 to 200 characters, not a ref.")
+    if not isinstance(app, str) or not app.strip() or re.search(r'[&|<>^%"\r\n\x00]', app):
+        return finish("error", APP_NOT_FOUND, "Pass a non-empty app name without shell metacharacters.")
+    if action == "type":
+        if not isinstance(text, str):
+            return finish("error", action_errors.INVALID_TARGET, "Text must be a string.")
+        if len(text) > cfg.max_type_chars:
+            return finish("error", action_errors.TEXT_TOO_LONG, "Text exceeds max_type_chars.")
+    try:
+        words = safety.blocklist(cfg)
+        rule = safety.is_dangerous(target, "", words)
+        if rule and not confirmed:
+            return blocked(rule)
+        snapshot = agent_cu.snapshot_interactive(app, cfg.agent_cu_cmd, cfg.agent_cu_timeout)
+        elements = agent_cu.parse_elements(snapshot)
+        resolved = matching.resolve(target, elements, role_pref=_EDITABLE_ROLES if action == "type" else None)
+        if isinstance(resolved, matching.NoMatch):
+            if action == "type":
+                # Diagnose an excluded label; it is never used as an action target.
+                excluded = matching.resolve(target, elements)
+                if (isinstance(excluded, matching.Ambiguous) and excluded.candidates
+                        and all(element.role not in _EDITABLE_ROLES for element in excluded.candidates)):
+                    return finish("error", action_errors.TARGET_NOT_EDITABLE,
+                                  "The matching targets are not editable fields.",
+                                  candidates=[_action_element(element, True) for element in excluded.candidates[:5]])
+                if isinstance(excluded, matching.Match) and excluded.element.role not in _EDITABLE_ROLES:
+                    selected = excluded.element
+                    rule = safety.is_dangerous("", selected.name, words)
+                    if rule and not confirmed:
+                        return blocked(rule)
+                    return finish("error", action_errors.TARGET_NOT_EDITABLE, "The target is not an editable field.")
+            return finish("not_found", action_errors.TARGET_NOT_FOUND, "No matching target was found.",
+                          candidates=[_action_element(element, True) for element in resolved.near[:5]])
+        if isinstance(resolved, matching.Ambiguous):
+            candidates = resolved.candidates[:5]
+            picked = None
+            if cfg.resolve_with_model:
+                try:
+                    picked = matching.pick_with_model(target, candidates, ollama or OllamaClient(cfg), cfg)
+                except Exception:
+                    picked = None
+            selected = next((element for element in candidates
+                             if isinstance(picked, agent_cu.Element) and picked.ref == element.ref), None)
+            if selected is None:
+                return finish("ambiguous", action_errors.TARGET_AMBIGUOUS, "Choose one of the candidate labels.",
+                              candidates=[_action_element(element, True) for element in candidates])
+            method = "model"
+        else:
+            selected, method = resolved.element, resolved.how
+        rule = safety.is_dangerous("", selected.name, words)
+        if rule and not confirmed:
+            return blocked(rule)
+        if action == "type" and selected.role not in _EDITABLE_ROLES:
+            return finish("error", action_errors.TARGET_NOT_EDITABLE, "The target is not an editable field.")
+        if action == "click":
+            agent_cu.click(selected.ref, app, cfg.agent_cu_cmd, cfg.agent_cu_timeout)
+        else:
+            agent_cu.type_text(text, app, selected.ref, cfg.agent_cu_cmd, cfg.agent_cu_timeout)
+    except CuError as error:
+        code = error.code if error.code in _ACTION_CODES else action_errors.AGENT_CU_FAILED
+        return finish("error", code, "The action could not complete.")
+    except Exception:
+        # Action tools return structured failures without forwarding diagnostics.
+        return finish("error", action_errors.AGENT_CU_FAILED, "The action could not complete.")
+    return finish("done")
+
+
+def click(app: str, target: str, cfg: Config, ollama: OllamaClient | None = None,
+          client: str | None = None, session_id: str | None = None,
+          confirm_dangerous: bool = False) -> dict:
+    return _action("click", app, target, cfg, ollama=ollama, client=client,
+                   session_id=session_id, confirm_dangerous=confirm_dangerous)
+
+
+def type_text(app: str, target: str, text: str, cfg: Config, ollama: OllamaClient | None = None,
+              client: str | None = None, session_id: str | None = None,
+              confirm_dangerous: bool = False) -> dict:
+    return _action("type", app, target, cfg, text=text, ollama=ollama, client=client,
+                   session_id=session_id, confirm_dangerous=confirm_dangerous)

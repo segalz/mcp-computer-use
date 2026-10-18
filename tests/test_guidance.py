@@ -69,3 +69,24 @@ def test_instructions_and_descriptions_registered():
     assert "max 300" in props["question"]["description"]
     assert "app" in props and "description" in props["app"]
     assert "OLLAMA_UNREACHABLE" in tools["health"].description
+
+
+
+def test_action_guidance_registered_with_explicit_human_confirmation():
+    from mcp_computer_use.guidance import CONFIRM_DESCRIPTION
+    sentence = "You MUST ask the human user and get explicit approval before setting confirm_dangerous=true"
+    assert sentence in CONFIRM_DESCRIPTION and sentence in INSTRUCTIONS
+    assert "look_at_screen is a READ-ONLY" in INSTRUCTIONS
+    assert "It cannot click" not in INSTRUCTIONS
+    tools = {tool.name: tool for tool in asyncio.run(server.build_server(Config()).list_tools())}
+    for name in ("click", "type_text"):
+        tool = tools[name]
+        assert sentence in tool.description
+        schema = getattr(tool, "input_schema", None) or getattr(tool, "inputSchema")
+        props = schema["properties"]
+        assert sentence in props["confirm_dangerous"]["description"]
+        assert props["confirm_dangerous"]["default"] is False
+        assert "visible label" in props["target"]["description"].lower()
+        assert "refs change" in props["target"]["description"]
+        assert {"app", "target"} <= set(schema["required"])
+    assert "text" in (getattr(tools["type_text"], "input_schema", None) or tools["type_text"].inputSchema)["required"]

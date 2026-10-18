@@ -5,7 +5,7 @@ import re
 import unicodedata
 
 INSTRUCTIONS = """\
-mcp-computer-use: a READ-ONLY screen reader. A local model reads one window on this computer and returns a short JSON answer, so you never pay for the raw window text.
+mcp-computer-use: look_at_screen is a READ-ONLY screen reader. A local model reads one window on this computer and returns a short JSON answer, so you never pay for the raw window text.
 
 How to call it:
 - Always write `question` in English, even if the user speaks another language (translate it yourself).
@@ -17,7 +17,8 @@ How to call it:
 - To check the bridge works before a task, call ping() (the first ping can take 30-50 s while the model loads).
 - If the local Ollama is down, the server starts it automatically (checked on calls without a session and on the first call of a session).
 - Memory: the local model stays loaded 3 min after a single call and 10 min while a session is active (or with keep_warm=true), and is unloaded early if free RAM gets low. When your task is done, call release_model() to free the memory right away.
-- It cannot click, type or change anything. Never ask it to.
+- Use click(app, target) or type_text(app, target, text) for app-scoped actions. Pass the visible label, not a ref; refs change between snapshots. Prefer one click per call. Read with look_at_screen first if unsure.
+- Dangerous actions require human approval: You MUST ask the human user and get explicit approval before setting confirm_dangerous=true. Actions only log client/session_id; they do not create context sessions.
 - If the result has `error`, follow `error.suggestion`: on OLLAMA_UNREACHABLE call health() first; on MODEL_TIMEOUT retry once; on APP_NOT_FOUND retry with an `app` from `available_apps`; on QUESTION_TOO_LONG split the question. `extracted` holds the short raw text you can still use.
 - A `hint` field is advice for your next call; the answer is still valid.
 """
@@ -87,3 +88,21 @@ def question_hints(q: str) -> list[str]:
     if mostly_non_latin(q):
         hints.append(HINT_ENGLISH)
     return hints
+
+
+CONFIRM_DESCRIPTION = (
+    "You MUST ask the human user and get explicit approval before setting confirm_dangerous=true. "
+    "Default false; confirms a dangerous action only after that approval."
+)
+CLICK_DESCRIPTION = (
+    "Click one visible UI label in the named app. Prefer one click per call. "
+    "Read with look_at_screen first if unsure. Pass the visible label, not a ref; refs change. "
+    + CONFIRM_DESCRIPTION
+)
+TYPE_DESCRIPTION = (
+    "Set one editable field's value in the named app, replacing its contents without submitting. "
+    "Pass the visible label; refs change. Read with look_at_screen first if unsure. "
+    + CONFIRM_DESCRIPTION
+)
+TARGET_DESCRIPTION = "Visible label (1 to 200 characters), not an @eN ref; refs change every snapshot. Add a role to clarify ambiguity."
+TEXT_DESCRIPTION = "Text to set in the editable field, within max_type_chars. Never submitted or included in action results or logs."
