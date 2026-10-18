@@ -1,0 +1,53 @@
+window "מחשבון"
+  window "מחשבון" val="מחשבון" id=TitleBar
+    menubar "System" id=SystemMenuBar
+      [@e1] menuitem "System"
+    [@e2] button "Minimise מחשבון" id=Minimize
+    [@e3] button "Maximise מחשבון" id=Maximize
+    [@e4] button "Close מחשבון" id=Close
+  window "מחשבון"
+    statictext "מחשבון" id=AppName
+    unknown id=NavView
+      [@e5] button "פתח ניווט" id=TogglePaneButton
+        statictext id=PaneTitleTextBlock
+      group
+        statictext "הביטוי הוא " id=CalculatorExpression
+        statictext "התצוגה היא 0" id=CalculatorResults
+        [@e6] button "פתח תפריט נשלף של היסטוריה" id=HistoryButton
+        group "פקדי זיכרון" id=MemoryPanel
+          [@e7] button "נקה את כל הזיכרון" id=ClearMemoryButton
+          [@e8] button "אחזור מהזיכרון" id=MemRecall
+          [@e9] button "חיבור מהזיכרון" id=MemPlus
+          [@e10] button "חיסור מהזיכרון" id=MemMinus
+          [@e11] button "מאגר זיכרון" id=memButton
+          [@e12] button "פתח תפריט נשלף של זיכרון" id=MemoryButton
+        group "פקדי תצוגה" id=DisplayControls
+          [@e13] button "אחוז" id=percentButton
+          [@e14] button "נקה ערך" id=clearEntryButton
+          [@e15] button "נקה" id=clearButton
+          [@e16] button "Backspace" id=backSpaceButton
+        group "פונקציות רגילות" id=StandardFunctions
+          [@e17] button "הופכי" id=invertButton
+          [@e18] button "ריבוע" id=xpower2Button
+          [@e19] button "שורש ריבועי" id=squareRootButton
+        group "אופרטורים רגילים" id=StandardOperators
+          [@e20] button "חלק ב" id=divideButton
+          [@e21] button "הכפל ב" id=multiplyButton
+          [@e22] button "פחות" id=minusButton
+          [@e23] button "ועוד" id=plusButton
+          [@e24] button "שווה" id=equalButton
+        group "מקלדת מספרית" id=NumberPad
+          [@e25] button "אפס" id=num0Button
+          [@e26] button "אחת" id=num1Button
+          [@e27] button "שתיים" id=num2Button
+          [@e28] button "שלוש" id=num3Button
+          [@e29] button "ארבע" id=num4Button
+          [@e30] button "חמש" id=num5Button
+          [@e31] button "שש" id=num6Button
+          [@e32] button "שבע" id=num7Button
+          [@e33] button "שמונה" id=num8Button
+          [@e34] button "תשע" id=num9Button
+          [@e35] button "תו הפרדה עשרוני" id=decimalSeparatorButton
+        [@e36] button "חיובי שלילי" id=negateButton
+      statictext "מצב מחשבון רגיל" id=Header
+      [@e37] button "שמור למעלה" id=NormalAlwaysOnTopButton
