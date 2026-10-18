@@ -5,8 +5,10 @@ from typing import Callable
 
 from ._common import Extraction
 from .claude_code import extract_claude, claude_snapshot_details
+from .browser import extract_browser, browser_snapshot_details, is_browser_app
 from .generic import extract_generic
 from .codex_desktop import extract_codex_desktop, codex_snapshot_details, is_codex_app
+from .editor import extract_editor, editor_snapshot_details, is_editor_app
 
 
 # Preserve the mutable legacy registries and their first-match-wins behavior.
@@ -37,3 +39,9 @@ register_profile("claude_code", lambda name: "claude" in name,
                  extract_claude, claude_snapshot_details)
 
 register_profile("codex_desktop", is_codex_app, extract_codex_desktop, codex_snapshot_details)
+
+register_profile("editor", is_editor_app, extract_editor, editor_snapshot_details)
+
+register_profile("browser", is_browser_app, extract_browser, browser_snapshot_details)
+
+# Generic remains the fallback.

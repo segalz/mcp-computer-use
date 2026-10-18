@@ -1,0 +1,41 @@
+vscode-file://vscode-app/c:/work/tools/antigravity/workbench.html
+project-alpha - Antigravity IDE - parser.py
+checked
+unchecked
+checked
+
+Explorer
+Explorer Section: project-alpha
+Outline
+Timeline
+
+src
+
+  
+parser.py
+Welcome to 
+Antigravity IDE
+Agent
+One
+moment,
+the
+agent
+is
+currently
+loading...
+AI may make mistakes. Double-check all generated code.
+Info: Do you want to install the recommended 'Python' extension from ms-python for the Python language?
+Trust folder and enable all features
+Browse folder in restricted mode
+
+Do you trust the authors of the files in this folder?
+Antigravity IDE provides features that may automatically execute files in this folder.
+Antigravity IDE may cause an AI agent to take unsafe actions based on the files' content that can result in data exfiltration or data loss. If you don't trust the authors of these files, we recommend to continue in restricted mode as the files may be malicious. See 
+vscode-file://vscode-app/c:/work/tools/antigravity/workbench.html
+ to learn more.
+C:\work\project-alpha
+unchecked
+Trust the authors of all files in the parent folder 'work'
+
+Do you want to install the recommended 'Python' extension from ms-python for the Python language?
+

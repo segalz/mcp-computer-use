@@ -13,21 +13,27 @@ from .claude_code import (
     CLAUDE_UI_NOISE, _FILE, _WAIT_BUTTONS,
     claude_status, extract_claude, claude_text_details, claude_snapshot_details,
 )
+from .browser import extract_browser, browser_snapshot_details, is_browser_app
 from .generic import extract_generic
 from .codex_desktop import extract_codex_desktop, codex_snapshot_details
+from .editor import extract_editor, editor_snapshot_details, is_editor_title
 from .registry import EXTRACTORS, SNAPSHOT_DETAILS, PROFILES, register_profile
 from .registry import select_profile as _select_profile
 
 
 def select_profile(app_name: str, window_title: str | None = None) -> str:
     profile = _select_profile(app_name)
+    if profile == "generic" and is_browser_app(app_name, window_title):
+        return "browser"
+    if profile == "generic" and app_name.strip().lower() != "antigravity" and is_editor_title(window_title):
+        return "editor"
     if profile == "generic" and isinstance(window_title, str) and "codex" in window_title.lower():
         return "codex_desktop"
     return profile
 
 
 def wants_snapshot(app: str, window_title: str | None = None) -> bool:
-    return (select_profile(app, window_title) == "codex_desktop"
+    return (select_profile(app, window_title) in {"codex_desktop", "editor", "browser"}
             or any(m(app.lower()) for m, _ in SNAPSHOT_DETAILS))
 
 
@@ -39,6 +45,11 @@ def extract(text: str, app: str, max_chars: int = 2000, tail_chars: int = 2000,
         window_title = next((label for _, role, label in snapshot_nodes if role == "window"), None)
     if select_profile(app, window_title) == "codex_desktop":
         return extract_codex_desktop(lines, app, max_chars, tail_chars, snapshot=snapshot, snapshot_nodes=snapshot_nodes)
+    if select_profile(app, window_title) == "editor":
+        return extract_editor(lines, app, max_chars, tail_chars, snapshot=snapshot,
+                              window_title=window_title, snapshot_nodes=snapshot_nodes)
+    if select_profile(app, window_title) == "browser":
+        return extract_browser(lines, app, max_chars, tail_chars, snapshot=snapshot)
     ex = None
     for match, fn in EXTRACTORS:
         if match(app.lower()):

@@ -1,0 +1,11 @@
+window "project-alpha - Antigravity IDE - parser.py"
+  group "project-alpha - Antigravity IDE - parser.py"
+    group
+      group
+        group
+          [@e1] button "Minimize"
+          [@e2] button "Maximize"
+          [@e3] button "Close"
+        group
+          group
+            group

@@ -1,0 +1,168 @@
+[@e1] window "project-alpha - Antigravity IDE - parser.py"
+  [@e2] group "project-alpha - Antigravity IDE - parser.py"
+    [@e3] group
+      [@e4] group
+        [@e5] group
+          [@e6] button "Minimize"
+          [@e7] button "Maximize"
+          [@e8] button "Close"
+        [@e9] group
+          [@e10] group
+            [@e11] group
+              [@e12] group
+                [@e13] textarea "project-alpha - Antigravity IDE - parser.py" val="vscode-file://vscode-app/c:/work/tools/antigravity/workbench.html" id=RootWebArea
+                  [@e14] group
+                    [@e15] group
+                      [@e16] menubar
+                        [@e17] menuitem "File"
+                        [@e18] menuitem "Edit"
+                        [@e19] menuitem "Selection"
+                        [@e20] menuitem "View"
+                        [@e21] menuitem "Go"
+                        [@e22] menuitem "Run"
+                        [@e23] menuitem "Terminal"
+                        [@e24] menuitem "Help"
+                      [@e25] statictext "project-alpha - Antigravity IDE - parser.py"
+                      [@e26] toolbar "Title actions"
+                        [@e27] button "Customize Layout..."
+                        [@e28] checkbox "Toggle Primary Side Bar (Ctrl+B)" val="checked"
+                        [@e29] checkbox "Toggle Panel (Ctrl+J)" val="unchecked"
+                        [@e30] checkbox "Toggle Agent (Ctrl+Alt+B)" val="checked"
+                        [@e31] button "Quick Open"
+                        [@e32] button "Open Browser (Preview)"
+                        [@e33] button "Editor-Specific Settings"
+                        [@e34] button "Profile"
+                          [@e35] group "Profile"
+                            [@e36] statictext ""
+                      [@e37] link "Log in →"
+                      [@e38] tabgroup "Active View Switcher"
+                        [@e39] tab "Explorer (Ctrl+Shift+E)"
+                          [@e40] group "Explorer (Ctrl+Shift+E)"
+                        [@e41] tab "Code Search (Ctrl+Shift+F)"
+                          [@e42] group "Code Search (Ctrl+Shift+F)"
+                        [@e43] tab "Source Control (Ctrl+Shift+G)"
+                          [@e44] group "Source Control (Ctrl+Shift+G)"
+                        [@e45] tab "Run and Debug (Ctrl+Shift+D)"
+                          [@e46] group "Run and Debug (Ctrl+Shift+D)"
+                        [@e47] tab "Remote Explorer"
+                          [@e48] group "Remote Explorer"
+                        [@e49] tab "Extensions (Ctrl+Shift+X)"
+                          [@e50] group "Extensions (Ctrl+Shift+X)"
+                      [@e51] statictext "Explorer"
+                      [@e52] toolbar "Explorer actions"
+                        [@e53] group
+                          [@e54] group
+                            [@e55] button "Views and More Actions..."
+                      [@e56] button "Explorer Section: project-alpha"
+                        [@e57] statictext "Explorer Section: project-alpha"
+                      [@e58] tree "Files Explorer"
+                        [@e59] treeitem "src" id=list_id_1_0
+                          [@e60] group "C:\work\project-alpha\src"
+                        [@e61] treeitem "parser.py" id=list_id_1_1
+                          [@e62] group "C:\work\project-alpha\src\parser.py"
+                        [@e63] treeitem "README.md" id=list_id_1_2
+                          [@e64] group "C:\work\project-alpha\README.md"
+                      [@e65] button "Outline Section"
+                        [@e66] statictext "Outline"
+                      [@e67] button "Timeline Section"
+                        [@e68] statictext "Timeline"
+                      [@e69] group id=workbench.parts.editor
+                        [@e70] group
+                          [@e71] tabgroup
+                            [@e72] tab "parser.py"
+                              [@e73] group "C:\work\project-alpha\src\parser.py"
+                              [@e74] toolbar "Tab actions"
+                                [@e75] button "Close (Ctrl+F4)"
+                          [@e76] toolbar "Editor actions"
+                            [@e77] button "Split Editor Right (Ctrl+\) [Alt] Split Editor Down"
+                            [@e78] button "Go Back (Alt+LeftArrow)"
+                            [@e79] button "Go Forward (Alt+RightArrow)"
+                            [@e80] group
+                              [@e81] group
+                                [@e82] button "More Actions..."
+                                  [@e83] statictext ""
+                          [@e84] list
+                            [@e85] listitem "src"
+                              [@e86] group "C:\work\project-alpha\src"
+                                [@e87] statictext "src"
+                              [@e88] statictext ""
+                            [@e89] listitem "  parser.py"
+                              [@e90] group "C:\work\project-alpha\src\parser.py"
+                                [@e91] statictext "  "
+                                [@e92] statictext "parser.py"
+                        [@e93] group "parser.py"
+                          [@e94] statictext
+                            [@e95] textfield "The editor is not accessible at this time. To enable screen reader optimized mode, use Shift+Alt+F1"
+                      [@e96] group id=workbench.parts.statusbar
+                        [@e97] group "remote" id=status.host
+                          [@e98] button "remote"
+                        [@e99] group "Restricted Mode: Some features are disabled because this folder is not trusted." id=status.workspaceTrust
+                          [@e100] button "Restricted Mode: Some features are disabled because this folder is not trusted."
+                        [@e101] group "No Problems" id=status.problems
+                          [@e102] button "No Problems"
+                        [@e103] group "Notifications" id=status.notifications
+                          [@e104] button "Notifications"
+                        [@e105] group "Python" id=status.editor.mode
+                          [@e106] button "Python"
+                        [@e107] group "Editor Language Status: $(copilot) No inline suggestion available, Inline suggestions" id=status.languageStatus
+                          [@e108] button "Editor Language Status: $(copilot) No inline suggestion available, Inline suggestions"
+                        [@e109] group "LF" id=status.editor.eol
+                          [@e110] button "LF"
+                        [@e111] group "UTF-8" id=status.editor.encoding
+                          [@e112] button "UTF-8"
+                        [@e113] group "Spaces: 4" id=status.editor.indentation
+                          [@e114] button "Spaces: 4"
+                        [@e115] group "Ln 1, Col 1" id=status.editor.selection
+                          [@e116] button "Ln 1, Col 1"
+                      [@e117] group
+                        [@e118] button "Help"
+                        [@e119] statictext "Welcome to "
+                        [@e120] statictext "Antigravity IDE"
+                        [@e121] button "Continue with Google"
+                        [@e122] button "Having trouble? Let us know"
+                        [@e123] button "Next⏎"
+                      [@e124] statictext "Agent"
+                      [@e125] statictext "One"
+                      [@e126] statictext "moment,"
+                      [@e127] statictext "the"
+                      [@e128] statictext "agent"
+                      [@e129] statictext "is"
+                      [@e130] statictext "currently"
+                      [@e131] statictext "loading..."
+                      [@e132] statictext "AI may make mistakes. Double-check all generated code."
+                      [@e133] statictext
+                        [@e134] statictext "Info: Do you want to install the recommended 'Python' extension from ms-python for the Python language?"
+                      [@e135] group
+                        [@e136] window "Info Do you trust the authors of the files in this folder?"
+                          [@e137] button "Yes, I trust the authors"
+                          [@e138] statictext "Trust folder and enable all features"
+                          [@e139] button "No, I don't trust the authors"
+                          [@e140] statictext "Browse folder in restricted mode"
+                          [@e141] group "Info" id=monaco-dialog-icon
+                            [@e142] statictext ""
+                          [@e143] statictext "Do you trust the authors of the files in this folder?"
+                          [@e144] group
+                            [@e145] statictext "Antigravity IDE provides features that may automatically execute files in this folder."
+                          [@e146] group
+                            [@e147] statictext "Antigravity IDE may cause an AI agent to take unsafe actions based on the files' content that can result in data exfiltration or data loss. If you don't trust the authors of these files, we recommend to continue in restricted mode as the files may be malicious. See "
+                            [@e148] link "our docs" val="vscode-file://vscode-app/c:/work/tools/antigravity/workbench.html"
+                            [@e149] statictext " to learn more."
+                          [@e150] group
+                            [@e151] statictext "C:\work\project-alpha"
+                          [@e152] checkbox "Trust the authors of all files in the parent folder 'work'" val="unchecked"
+                          [@e153] group
+                            [@e154] statictext "Trust the authors of all files in the parent folder 'work'"
+                      [@e155] list "Info: Do you want to install the recommended 'Python' extension from ms-python for the Python language?, notification"
+                        [@e156] window "Info: Do you want to install the recommended 'Python' extension from ms-python for the Python language?, notification, Inspect the response in the accessible view with Alt+F2" id=list_id_3_0
+                          [@e157] group
+                            [@e158] button "Install"
+                            [@e159] button "Show Recommendations"
+                            [@e160] statictext ""
+                            [@e161] group
+                              [@e162] statictext "Do you want to install the recommended 'Python' extension from ms-python for the Python language?"
+                            [@e163] toolbar "Notification Actions"
+                              [@e164] group
+                                [@e165] group
+                                  [@e166] button "More Actions..."
+                                    [@e167] statictext ""
+                              [@e168] button "Clear Notification (Delete)"
