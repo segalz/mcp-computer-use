@@ -18,6 +18,11 @@ INVALID_TARGET = "INVALID_TARGET"
 TEXT_TOO_LONG = "TEXT_TOO_LONG"
 TARGET_NOT_EDITABLE = "TARGET_NOT_EDITABLE"
 
+IMAGE_CAPTURE_FAILED = "IMAGE_CAPTURE_FAILED"
+IMAGE_CAPTURE_BLANK = "IMAGE_CAPTURE_BLANK"
+IMAGE_WINDOW_MINIMIZED = "IMAGE_WINDOW_MINIMIZED"
+IMAGE_CAPTURE_TIMEOUT = "IMAGE_CAPTURE_TIMEOUT"
+
 _DEFAULTS = {
     DANGEROUS_ACTION_NEEDS_CONFIRMATION: (True, "Ask the human user explicitly; only after they agree, call again with confirm_dangerous=true."),
     TARGET_NOT_FOUND: (True, "Use a name from `candidates`, or call look_at_screen."),
@@ -34,6 +39,10 @@ _DEFAULTS = {
     APP_NOT_FOUND: (False, "Call again with an explicit `app` from `available_apps`."),
     QUESTION_TOO_LONG: (True, "Split it into shorter, focused English questions and call look_at_screen once per step (first status, then details)."),
     EMPTY_QUESTION: (True, "Pass one short English question, e.g. 'Is Claude working or finished?'."),
+    IMAGE_CAPTURE_FAILED: (True, "Retry; make sure the window is open, visible, and PowerShell is available."),
+    IMAGE_CAPTURE_BLANK: (True, "The window produced a blank capture (it may be minimized, hardware-accelerated, or covered). Try without include_image or inspect via UI tree."),
+    IMAGE_WINDOW_MINIMIZED: (True, "Restore or un-minimize the window before requesting an image, or use look_at_screen without include_image."),
+    IMAGE_CAPTURE_TIMEOUT: (True, "Capture timed out. Retry, or call look_at_screen without include_image."),
 }
 
 

@@ -26,7 +26,7 @@ mcp-computer-use = "mcp_computer_use.server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mcp_computer_use = ["prompts/*.md"]
+mcp_computer_use = ["prompts/*.md", "scripts/*.ps1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

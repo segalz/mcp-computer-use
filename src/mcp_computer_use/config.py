@@ -20,6 +20,7 @@ class Config:
     model: str = "gpt-oss:20b"
     agent_cu_cmd: str = "agent-cu"
     agent_cu_timeout: float = 20.0
+    image_timeout: float = 15.0
     max_chars: int = 2000          # cap on extracted text sent to the model
     max_question_chars: int = 300  # longer questions are rejected (QUESTION_TOO_LONG)
     generic_tail_chars: int = 2000  # generic extractor: last N chars of window text
