@@ -31,9 +31,9 @@ def _no_real_ollama_spawn(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("test tried to spawn a real ollama")
     monkeypatch.setattr(autostart, "_spawn", boom)
-    autostart.state.update(autostarted=False, last=None)
+    autostart.state.update(autostarted=False, last=None, method=None)
     yield
-    autostart.state.update(autostarted=False, last=None)
+    autostart.state.update(autostarted=False, last=None, method=None)
 
 
 @pytest.fixture(autouse=True)
@@ -105,6 +105,7 @@ class FakeAgentCu:
 def fake_cu(monkeypatch):
     fake = FakeAgentCu()
     monkeypatch.setattr(agent_cu, "resolve_cmd", lambda cmd: "/usr/bin/agent-cu")
+    monkeypatch.setattr(agent_cu, "foreground_pid", lambda: None)  # never the real desktop
     monkeypatch.setattr(agent_cu.subprocess, "run", fake)
     return fake
 
@@ -130,3 +131,15 @@ def make_ollama(cfg, chat=None, loaded=True, present=True, unreachable=False, re
                 "eval_count": 60, "eval_duration": 5_000_000_000, "total_duration": 6_000_000_000})
         return httpx.Response(404)
     return OllamaClient(cfg, transport=httpx.MockTransport(handler))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_timing_stats(monkeypatch, tmp_path):
+    """Fresh adaptive-timeout history per test; never the real sessions dir."""
+    from pathlib import Path
+    from mcp_computer_use import timeouts
+    timeouts._registry.clear()
+    monkeypatch.setattr(timeouts, "_stats_path",
+                        lambda c: Path(c.sessions_dir or tmp_path / "timing") / timeouts.STATS_FILE)
+    yield
+    timeouts._registry.clear()

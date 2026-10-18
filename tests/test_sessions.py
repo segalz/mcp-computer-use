@@ -13,7 +13,7 @@ from conftest import make_ollama, CLAUDE_TEXT
 
 def files(cfg):
     d = sessions_dir(cfg)
-    return sorted(p.name for p in d.glob("*.json")) if d.exists() else []
+    return sorted(p.name for p in d.glob("*__*.json")) if d.exists() else []
 
 
 def test_sanitize():

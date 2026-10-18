@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,7 @@ class AppInfo:
     name: str
     frontmost: bool = False
     title: str = ""
+    pid: int | None = None
 
 
 def resolve_cmd(cmd: str) -> str | None:
@@ -114,7 +116,9 @@ def parse_apps(stdout: str) -> list[AppInfo]:
                 continue
             front = bool(item.get("frontmost") or item.get("focused") or item.get("active")
                          or item.get("isFrontmost") or item.get("foreground"))
-            apps.append(AppInfo(name=str(name), frontmost=front, title=str(item.get("title") or "")))
+            pid = item.get("pid")
+            apps.append(AppInfo(name=str(name), frontmost=front, title=str(item.get("title") or ""),
+                                pid=pid if isinstance(pid, int) and not isinstance(pid, bool) else None))
     return apps
 
 
@@ -122,7 +126,40 @@ def list_apps(cmd: str = "agent-cu", timeout: float = 20.0) -> list[AppInfo]:
     return parse_apps(run(["apps"], cmd, timeout))
 
 
-def choose_app(apps: list[AppInfo], question: str) -> AppInfo | None:
+def foreground_pid() -> int | None:
+    """Process id that owns the current foreground window (Windows only), else None."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.WinDLL("user32")
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return None
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value or None
+    except (OSError, AttributeError, ImportError):
+        return None
+
+
+def foreground_app(apps: list[AppInfo], pid: int | None = None) -> AppInfo | None:
+    """The app owning the foreground window (by pid), else the one agent-cu marks frontmost."""
+    pid = foreground_pid() if pid is None else pid
+    if pid:
+        for a in apps:
+            if a.pid == pid:
+                return a
+    for a in apps:
+        if a.frontmost:
+            return a
+    return None
+
+
+def choose_app(apps: list[AppInfo], question: str, foreground: AppInfo | None = None) -> AppInfo | None:
     if not apps:
         return None
     q = question.lower()
@@ -136,7 +173,9 @@ def choose_app(apps: list[AppInfo], question: str) -> AppInfo | None:
             for a in apps:
                 if target in a.name.lower() or target in a.title.lower():
                     return a
-    # 3) frontmost window, else first
+    # 3) foreground window, else frontmost, else first
+    if foreground is not None:
+        return foreground
     for a in apps:
         if a.frontmost:
             return a

@@ -267,6 +267,7 @@ def pick_with_model(
     candidates: list[Element],
     ollama: "OllamaClient",
     cfg: "Config",
+    elapsed: float = 0.0,
 ) -> "Element | None":
     """Use the local model to resolve ambiguity among *candidates*.
 
@@ -303,8 +304,13 @@ def pick_with_model(
         # Compute timeout (mirror existing logic in core.py / timeouts.py) -----
         from .memory import keep_alive_for  # local import to avoid circular deps
 
+        from .timeouts import budget_cap
+
         cold = not ollama.is_loaded()
-        timeout = cfg.timeout_base + (cfg.cold_load_extra if cold else 0.0)
+        # *elapsed*: seconds already spent in this tool call; the call budget caps the wait
+        timeout, _ = budget_cap(cfg.timeout_base + (cfg.cold_load_extra if cold else 0.0), cfg, elapsed)
+        if timeout is None:
+            return None  # budget used up: caller returns TARGET_AMBIGUOUS with candidates
         keep_alive, _ = keep_alive_for(cfg)
 
         # Call the model -------------------------------------------------------

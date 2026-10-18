@@ -9,11 +9,19 @@ max_question_chars = 300
 generic_tail_chars = 2000
 num_ctx = 4096
 temperature = 0
-timeout_base = 10
+# warm answers take ~12s at ~11 tok/s; keep generous headroom
+timeout_base = 30
 timeout_per_1k_chars = 4
-timeout_min = 8
-timeout_max = 60
+timeout_min = 20
+timeout_max = 90
 cold_load_extra = 45
+# adaptive: next timeout = max(2 x p90 of the last adaptive_window warm calls, timeout_min) + size term;
+# a MODEL_TIMEOUT multiplies the next one by 1.5 until a success. false = the static formula above.
+adaptive_timeout = true
+adaptive_window = 8
+# total wall budget per tool call (window reading + autostart + model); keep it under the host's
+# tool timeout (Codex tool_timeout_sec = 120). 0 = no cap.
+call_budget_seconds = 110
 health_http = false
 health_host = "127.0.0.1"
 health_port = 8765
@@ -27,7 +35,7 @@ min_free_mb = 2048
 memory_watch = true
 memory_watch_interval = 30
 autostart_ollama = true
-autostart_timeout = 10
+autostart_timeout = 30
 # system_prompt_file = "C:/Develop/mcp-computer-use/my_prompt.md"
 #
 # [safety]

@@ -84,7 +84,7 @@ def build_server(cfg: Config, ollama: OllamaClient | None = None) -> _Server:
 
     @mcp.tool(description=CLICK_DESCRIPTION)
     def click(
-        app: Annotated[str, Field(description=APP_DESCRIPTION)],
+        app: Annotated[str | None, Field(description=APP_DESCRIPTION)] = None,
         target: Annotated[str | None, Field(description=TARGET_DESCRIPTION + " Omit for a batch and supply steps.")] = None,
         client: Annotated[str | None, Field(description=CLIENT_DESCRIPTION)] = None,
         session_id: Annotated[str | None, Field(description=SESSION_DESCRIPTION)] = None,
@@ -96,9 +96,9 @@ def build_server(cfg: Config, ollama: OllamaClient | None = None) -> _Server:
 
     @mcp.tool(description=TYPE_DESCRIPTION)
     def type_text(
-        app: Annotated[str, Field(description=APP_DESCRIPTION)],
         target: Annotated[str, Field(description=TARGET_DESCRIPTION)],
         text: Annotated[str, Field(description=TEXT_DESCRIPTION)],
+        app: Annotated[str | None, Field(description=APP_DESCRIPTION)] = None,
         client: Annotated[str | None, Field(description=CLIENT_DESCRIPTION)] = None,
         session_id: Annotated[str | None, Field(description=SESSION_DESCRIPTION)] = None,
         confirm_dangerous: Annotated[bool, Field(description=CONFIRM_DESCRIPTION)] = False,

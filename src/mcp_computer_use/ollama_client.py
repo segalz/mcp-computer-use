@@ -61,10 +61,22 @@ class OllamaClient:
             return None
         return None
 
-    def is_loaded(self, model: str | None = None) -> bool:
+    def is_loaded(self, model: str | None = None, num_ctx: int | None = None) -> bool:
+        """True if the model is in /api/ps. With num_ctx, a copy loaded with a different
+        context_length counts as not loaded: Ollama reloads it on the next call (cold)."""
         model = model or self.cfg.model
         try:
-            return any(_same_model(m.get("name") or m.get("model", ""), model) for m in self.running())
+            for m in self.running():
+                if not _same_model(m.get("name") or m.get("model", ""), model):
+                    continue
+                try:
+                    ctx = int(m.get("context_length") or 0)
+                except (TypeError, ValueError):
+                    ctx = 0  # unparseable: ignore, presence decides
+                if num_ctx and ctx > 0 and ctx != num_ctx:
+                    continue
+                return True
+            return False
         except Exception:  # CuError, AttributeError, TypeError from malformed /api/ps
             return False
 
@@ -88,7 +100,8 @@ class OllamaClient:
         model = self.cfg.model
         body = {"model": model, "stream": False,
                 "messages": [{"role": "user", "content": "Reply with exactly: pong"}],
-                "options": {"num_predict": 128, "temperature": 0.0, "num_ctx": 1024},
+                # same num_ctx as chat: a different one makes Ollama reload the model on the next look
+                "options": {"num_predict": 128, "temperature": 0.0, "num_ctx": self.cfg.num_ctx},
                 "think": "low" if model.startswith("gpt-oss") else False,
                 "keep_alive": keep_alive if keep_alive is not None else self.cfg.keep_alive_idle}
         try:

@@ -20,6 +20,22 @@ def test_cold_load_allowance():
     assert compute_timeout(1000, cfg, model_loaded=False) == compute_timeout(1000, cfg) + 45
 
 
+def test_default_warm_budget_has_headroom():
+    # gpt-oss:20b at ~11 tok/s answers warm in ~12s; the old 10s base timed out (MODEL_TIMEOUT at 10.71s)
+    cfg = Config()
+    for chars in (0, 300, 1000, 2000):
+        assert compute_timeout(chars, cfg, model_loaded=True) >= 25
+    assert compute_timeout(2000, cfg) <= cfg.timeout_max
+    assert compute_timeout(2000, cfg, model_loaded=False) == compute_timeout(2000, cfg) + cfg.cold_load_extra
+
+
+def test_default_timeouts_from_load_config():
+    cfg = load_config(path="/nonexistent.toml", env={})
+    assert (cfg.timeout_base, cfg.timeout_min, cfg.timeout_max, cfg.cold_load_extra) == (30, 20, 90, 45)
+    cfg = load_config(path="/nonexistent.toml", env={"MCP_CU_TIMEOUT_BASE": "12"})
+    assert cfg.timeout_base == 12
+
+
 def test_env_overrides(tmp_path):
     f = tmp_path / "c.toml"
     f.write_text('model = "qwen3:4b"\nmax_chars = 1500\n[unused]\n', encoding="utf-8")

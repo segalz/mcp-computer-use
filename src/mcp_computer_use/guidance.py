@@ -15,7 +15,7 @@ When to use each tool:
 
 How to call look_at_screen:
 - Write `question` in English (translate user input if needed). One short, focused question per call (max 300 chars).
-- Pass `app` when known (e.g. "Claude", "ChatGPT", "מחשבון"); otherwise frontmost window is used.
+- Pass `app` when known (e.g. "Claude", "ChatGPT", "מחשבון"); otherwise the foreground window is used.
 - For multi-part checks call step by step: status first, then details.
 - `details` is extracted by code for Claude Code, Codex desktop (ChatGPT), editors, and browsers (project, session, branch, next_step, failures, files, url); use it directly instead of asking again.
 - Context across calls: pass `client` (e.g. "codex") and `session_id` (e.g. "task-1") to get `changed_since_last` and shorter answers. Omit them for independent calls.
@@ -52,7 +52,8 @@ Call this first if look_at_screen returns OLLAMA_UNREACHABLE or MODEL_NOT_FOUND.
 
 QUESTION_DESCRIPTION = ("One short, focused question in English (max 300 chars), "
                         "e.g. 'Is Claude working or finished?'. Split bigger checks into several calls.")
-APP_DESCRIPTION = "Optional app/window name, e.g. 'Claude' or 'ChatGPT'. Pass it when known."
+APP_DESCRIPTION = ("Optional app/window name, e.g. 'Claude' or 'ChatGPT'. Pass it when known; "
+                   "if omitted, the foreground window is used.")
 CLIENT_DESCRIPTION = ("Optional. Your client name, e.g. 'codex' or 'claude' ([A-Za-z0-9_-], max 64). "
                       "Used with session_id to keep context between calls.")
 SESSION_DESCRIPTION = ("Optional. A session name you choose, e.g. 'fix-ui' ([A-Za-z0-9_-], max 64). Reuse it on "

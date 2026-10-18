@@ -88,11 +88,12 @@ def test_action_guidance_registered_with_explicit_human_confirmation():
         assert props["confirm_dangerous"]["default"] is False
         assert "visible label" in props["target"]["description"].lower()
         assert "refs change" in props["target"]["description"]
-        assert "app" in schema["required"]
+        assert "app" not in schema.get("required", [])  # omitted = foreground window
+        assert props["app"]["default"] is None
         if name == "type_text":
             assert "target" in schema["required"]
         else:
-            assert "target" not in schema["required"]
+            assert "target" not in schema.get("required", [])
     assert "text" in (getattr(tools["type_text"], "input_schema", None) or tools["type_text"].inputSchema)["required"]
 
 
@@ -114,10 +115,11 @@ def test_batch_click_guidance_registered():
 
 
 
-def test_click_schema_requires_only_app_and_lists_steps():
+def test_click_schema_requires_nothing_and_lists_steps():
     tools = {tool.name: tool for tool in asyncio.run(server.build_server(Config()).list_tools())}
     schema = getattr(tools["click"], "input_schema", None) or tools["click"].inputSchema
-    assert schema["required"] == ["app"]
+    assert schema.get("required", []) == []  # app omitted = foreground window
+    assert schema["properties"]["app"]["default"] is None
     assert "steps" in schema["properties"]
     assert schema["properties"]["target"]["default"] is None
 

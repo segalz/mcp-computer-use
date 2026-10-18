@@ -28,9 +28,9 @@ This server does the reading **locally**:
 ## Tools
 | Tool | Description |
 |---|---|
-| `look_at_screen(question, app=None, client=None, session_id=None, keep_warm=False, include_image=False)` | Reads one window and answers. If `app` is omitted, the app named in the question (also Hebrew aliases like "קלוד") or the frontmost app is used. Read-only. `client` / `session_id` are optional (see *Sessions*). Pass `include_image=True` to also return a downscaled window JPEG. CLI: `--ask QUESTION [--app APP] [--image-out PATH]`. |
-| `click(app, target=None, steps=None, client=None, session_id=None, confirm_dangerous=False)` | Clicks a visible label, or a sequence of 1–10 labels via `steps`. Stopped on first failure. CLI: `--click APP TARGET`, `--click-steps APP STEP...`. |
-| `type_text(app, target, text, client=None, session_id=None, confirm_dangerous=False)` | Sets the value of an editable field in the app without submitting. Replaces content; Enter is never pressed; no keystrokes sent to other windows. CLI: `--type APP TARGET TEXT`. |
+| `look_at_screen(question, app=None, client=None, session_id=None, keep_warm=False, include_image=False)` | Reads one window and answers. If `app` is omitted, the app named in the question (also Hebrew aliases like "קלוד") or the foreground window is used. Read-only. `client` / `session_id` are optional (see *Sessions*). Pass `include_image=True` to also return a downscaled window JPEG. CLI: `--ask QUESTION [--app APP] [--image-out PATH]`. |
+| `click(app=None, target=None, steps=None, client=None, session_id=None, confirm_dangerous=False)` | Clicks a visible label, or a sequence of 1–10 labels via `steps`. Without `app`, the foreground window's app is used (`APP_NOT_FOUND` if none). Stopped on first failure. CLI: `--click APP TARGET`, `--click-steps APP STEP...`. |
+| `type_text(target, text, app=None, client=None, session_id=None, confirm_dangerous=False)` | Sets the value of an editable field in the app without submitting. Without `app`, the foreground window's app is used. Replaces content; Enter is never pressed; no keystrokes sent to other windows. CLI: `--type APP TARGET TEXT`. |
 | `ping()` | Heartbeat: server up, local Ollama reachable (auto-started if needed), model replies `pong`. No screen reading. Returns `{ok, server, ollama, model_reply_ok, model, seconds, cold, error?}`. The first ping can take 30–50 s when the model is cold. CLI: `--ping`. |
 | `release_model()` | Unloads the model now and returns `freed_mb`. Call it at the end of a task. CLI: `--release`. |
 | `health()` | Checks backend health: Ollama reachable, model pulled, model loaded, memory, free RAM, current keep_alive policy, agent-cu installed. CLI: `--health`. |
@@ -231,12 +231,18 @@ sanitized to `[A-Za-z0-9_-]`, max 64 chars.
 ### Ollama auto-start
 If `OLLAMA_URL` points at this machine (`127.0.0.1` / `localhost`) and Ollama does not answer, the server starts
 `ollama serve` itself: detached, hidden window, with `OLLAMA_HOST=127.0.0.1:<port from OLLAMA_URL>` set **only for
-the child process** (your global `OLLAMA_HOST`, e.g. a Mac, is never touched), then waits up to 10 s for `/api/tags`.
+the child process** (your global `OLLAMA_HOST`, e.g. a Mac, is never touched), then polls `/api/tags` for up to 30 s
+(a cold `ollama serve` can need more than 10 s). The started server outlives the MCP host: on Windows it is
+started with `CREATE_BREAKAWAY_FROM_JOB`; if the host's job object refuses that (e.g. `codex exec`) or the child
+is still in a job, it is started through WMI `Win32_Process.Create` instead (parented by WmiPrvSE, outside the
+host's job). The method used is reported as `method` (`breakaway` / `wmi` / `popen` last resort) in
+`health().last_autostart`; server output goes to `.sessions/ollama-autostart.log`. A call right after an
+auto-start gets the cold-load timeout budget.
 - Checked on every call **without** a session and on the **first** call of a session (new session file); not on
   every call inside a session. If a call inside a session fails with `OLLAMA_UNREACHABLE`, it starts Ollama once and retries once.
 - A port check plus a lock file (`.sessions/ollama-autostart.lock`) prevent double starts.
 - `ollama` is found on PATH or at `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`.
-- `MCP_CU_AUTOSTART_OLLAMA=0` disables it; `MCP_CU_AUTOSTART_TIMEOUT` (default 10). `health()` reports `ollama_autostarted`.
+- `MCP_CU_AUTOSTART_OLLAMA=0` disables it; `MCP_CU_AUTOSTART_TIMEOUT` (default 30). `health()` reports `ollama_autostarted`.
 
 ### Memory release (smart keep_alive)
 - Single call, no active session: the model stays loaded **3 min** (`MCP_CU_KEEP_ALIVE_IDLE`).
@@ -262,15 +268,38 @@ Success:
 ```
 Failure (the caller can still act on `extracted`):
 ```json
-{"error": {"code": "MODEL_TIMEOUT", "message": "gpt-oss:20b did not answer within 18s",
+{"error": {"code": "MODEL_TIMEOUT", "message": "gpt-oss:20b did not answer within 38s",
            "retryable": true, "suggestion": "Retry once (the model may have been cold-loading) or use the raw `extracted` text."},
  "windows_seen": ["Claude"],
  "extracted": {"status": "finished", "last_message": "…", "extractor": "claude", "truncated": false},
- "model_used": "gpt-oss:20b", "timeout_seconds": 18.0, "duration_seconds": 19.6}
+ "model_used": "gpt-oss:20b", "timeout_seconds": 38.0, "duration_seconds": 38.4}
 ```
 
 **Smart timeout:** `timeout_base + timeout_per_1k_chars × chars/1000`, clamped to `[timeout_min, timeout_max]`,
-plus `cold_load_extra` when `/api/ps` shows the model is not loaded.
+plus `cold_load_extra` when `/api/ps` shows the model is not loaded, is loaded with a different `context_length`
+than `num_ctx` (Ollama would reload it), or Ollama was just auto-started. Defaults (30 s base, 20–90 s, +45 s cold)
+leave generous headroom over a warm `gpt-oss:20b` answer (~12 s at ~11 tok/s on a laptop). `ping()` and the
+`click` model resolver use `timeout_base` (+ `cold_load_extra` when cold) directly. `ping()` uses the same `num_ctx` as
+`look_at_screen`, so the model it loads is reused by the next call.
+
+**Adaptive timeout** (`adaptive_timeout = true`, default): after each successful `look_at_screen` model call its
+wall-clock duration is recorded; warm calls go into a rolling window of the last `adaptive_window` (8) samples, cold-load
+calls are kept apart and never used. The next warm timeout is `max(2 × p90(window), timeout_min)` plus the same
+per-1k-chars term (added on top, a conservative choice since samples already include their own size), clamped to
+`[timeout_min, timeout_max]`; cold load still adds `cold_load_extra`. No samples yet → the static formula above.
+A `MODEL_TIMEOUT` never shrinks it: the next timeout is multiplied by 1.5 per timeout (still capped by `timeout_max`)
+until a success resets the bump. History is per process and persisted atomically to `timing_stats.json` in the
+sessions dir, so a fresh process (each `codex exec` run) starts with it; a missing or corrupt file means no history.
+`adaptive_timeout = false` restores the static formula.
+
+**Call budget** (`call_budget_seconds`, default 110, env `MCP_CU_CALL_BUDGET_SECONDS`, `0` = off): a total wall
+budget per tool call measured from its start, so the answer (or structured error) arrives before the MCP host's
+tool timeout (Codex `tool_timeout_sec = 120`). The autostart wait is shrunk to leave room for the model, and every
+model timeout (`look_at_screen` first try and retry, `ping`, the `click` resolver; a click batch counts as one call)
+is `min(computed, budget − elapsed)`. With less than 5 s left the call returns `MODEL_TIMEOUT` at once with a retry
+suggestion (`click` returns `TARGET_AMBIGUOUS` with candidates). Successful and failed `look_at_screen` results carry
+`timing`: `timeout_seconds`, `timeout_source` (`static` | `adaptive` | `bumped`), `samples`, `cold`,
+`budget_seconds`, `budget_capped`, `model_wall_seconds`.
 
 ## Setup (Windows, PowerShell)
 Requirements: Python 3.10+, Node + `npm i -g agent-cu`, Ollama.
@@ -301,8 +330,10 @@ Priority: defaults < TOML file < env vars. File: `mcp-computer-use.toml` in the 
 | `MCP_CU_MODEL` / `MODEL` | `gpt-oss:20b` | Model used for summarization / candidate picking |
 | `MCP_CU_MAX_CHARS` | `2000` | Max chars extracted from window for model |
 | `MCP_CU_MAX_QUESTION_CHARS` | `300` | Longer questions rejected with `QUESTION_TOO_LONG` |
-| `MCP_CU_TIMEOUT_BASE` / `_PER_1K_CHARS` / `_MIN` / `_MAX` | `10` / `4` / `8` / `60` | Smart timeout bounds and scaling |
+| `MCP_CU_TIMEOUT_BASE` / `_PER_1K_CHARS` / `_MIN` / `_MAX` | `30` / `4` / `20` / `90` | Smart timeout bounds and scaling |
 | `MCP_CU_COLD_LOAD_EXTRA` | `45` | Extra seconds added when model is cold |
+| `MCP_CU_ADAPTIVE_TIMEOUT` / `MCP_CU_ADAPTIVE_WINDOW` | `true` / `8` | Learn the timeout from recent warm calls |
+| `MCP_CU_CALL_BUDGET_SECONDS` | `110` | Total wall budget per tool call (`0` = off) |
 | `MCP_CU_AGENT_CU_CMD` / `MCP_CU_AGENT_CU_TIMEOUT` | `agent-cu` / `20` | Command and timeout for UI automation |
 | `MCP_CU_HEALTH_HTTP` / `_HOST` / `_PORT` | `false` / `127.0.0.1` / `8765` | Optional HTTP health check server |
 | `MCP_CU_SYSTEM_PROMPT_FILE` | bundled `prompts/system_prompt.md` | Override default system prompt |
@@ -313,7 +344,7 @@ Priority: defaults < TOML file < env vars. File: `mcp-computer-use.toml` in the 
 | `MCP_CU_SESSION_ACTIVE_MINUTES` | `10` | Session recency window for keeping model alive |
 | `MCP_CU_MIN_FREE_MB` | `2048` | Minimum free RAM in MB before unloading model |
 | `MCP_CU_MEMORY_WATCH` / `MCP_CU_MEMORY_WATCH_INTERVAL` | `true` / `30` | Background watcher to unload model under RAM pressure |
-| `MCP_CU_AUTOSTART_OLLAMA` / `MCP_CU_AUTOSTART_TIMEOUT` | `true` / `10` | Auto-start local Ollama if unreachable |
+| `MCP_CU_AUTOSTART_OLLAMA` / `MCP_CU_AUTOSTART_TIMEOUT` | `true` / `30` | Auto-start local Ollama if unreachable |
 | `MCP_CU_SAFETY_BLOCKLIST` | `""` | Additional comma-separated blocklist words |
 | `MCP_CU_SAFETY_BLOCKLIST_EXTRA` | `""` | Extra additional blocklist words |
 | `MCP_CU_ACTION_LOG_TTL_HOURS` | `24` | Hours before old action audit records are purged |
@@ -456,8 +487,8 @@ MIT
 | כלי | תיאור |
 |---|---|
 | `look_at_screen(question, app=None, client=None, session_id=None, keep_warm=False, include_image=False)` | קורא חלון אחד ועונה. לקריאה בלבד. ללא `app`, נבחרת התוכנה מהשאלה או החלון שבחזית. ‏`client` ו-`session_id` הם אופציונליים (ראו "סשנים"). העברת `include_image=True` מחזירה בנוסף צילום JPEG של החלון. שורת פקודה: `--ask QUESTION [--app APP] [--image-out PATH]`. |
-| `click(app, target=None, steps=None, client=None, session_id=None, confirm_dangerous=False)` | לוחץ על תווית גלויה, או על רצף של 1 עד 10 תוויות דרך `steps`. נעצר בכישלון ראשון. שורת פקודה: `--click APP TARGET`, `--click-steps APP STEP...`. |
-| `type_text(app, target, text, client=None, session_id=None, confirm_dangerous=False)` | מזין ערך ישירות לשדה עריכה ללא שליחה (Enter אינו נלחץ). מחליף תוכן קיים; לא נשלחות הקשות לחלונות אחרים. שורת פקודה: `--type APP TARGET TEXT`. |
+| `click(app=None, target=None, steps=None, client=None, session_id=None, confirm_dangerous=False)` | לוחץ על תווית גלויה, או על רצף של 1 עד 10 תוויות דרך `steps`. ללא `app` נבחר החלון שבחזית. נעצר בכישלון ראשון. שורת פקודה: `--click APP TARGET`, `--click-steps APP STEP...`. |
+| `type_text(target, text, app=None, client=None, session_id=None, confirm_dangerous=False)` | מזין ערך ישירות לשדה עריכה ללא שליחה (Enter אינו נלחץ). ללא `app` נבחר החלון שבחזית. מחליף תוכן קיים; לא נשלחות הקשות לחלונות אחרים. שורת פקודה: `--type APP TARGET TEXT`. |
 | `ping()` | בדיקת דופק: מוודא שהשרת עונה, ש-Ollama המקומי זמין (ומפעיל אותו אם צריך), ושהמודל עונה `pong`. לא קורא מסך. מחזיר `{ok, server, ollama, model_reply_ok, model, seconds, cold, error?}`. הפינג הראשון יכול לקחת 30–50 שניות כשהמודל עוד לא טעון (cold). שורת פקודה: `--ping`. |
 | `release_model()` | פורק את המודל מהזיכרון מיד ומחזיר כמה זיכרון שוחרר (`freed_mb`). שורת פקודה: `--release`. |
 | `health()` | בודק אם Ollama זמין, אם המודל הורד ונטען, זיכרון, RAM פנוי, מדיניות keep_alive ואם agent-cu מותקן. שורת פקודה: `--health`. |
@@ -642,11 +673,11 @@ $$\text{claude\_code} \longrightarrow \text{codex\_desktop} \longrightarrow \tex
 - **כללי מצב השרשור ב-Codex desktop**: כללי זיהוי מצב השרשור נבנו ותוקפו על גבי דגימות סינתטיות ועשויים לדרוש כיול והתאמות מול עדכוני גרסה עתידיים של האפליקציה.
 
 ### הפעלה אוטומטית של Ollama
-אם `OLLAMA_URL` מצביע על המחשב הזה (`127.0.0.1` או `localhost`) ו-Ollama לא עונה, השרת מפעיל בעצמו `ollama serve` ברקע, בחלון מוסתר, עם `OLLAMA_HOST=127.0.0.1:<הפורט מ-OLLAMA_URL>` **רק לתהליך הזה**. ה-`OLLAMA_HOST` הגלובלי שלך (למשל ה-Mac) לא משתנה. אחר כך הוא מחכה עד 10 שניות ש-`/api/tags` יענה.
+אם `OLLAMA_URL` מצביע על המחשב הזה (`127.0.0.1` או `localhost`) ו-Ollama לא עונה, השרת מפעיל בעצמו `ollama serve` ברקע, בחלון מוסתר, עם `OLLAMA_HOST=127.0.0.1:<הפורט מ-OLLAMA_URL>` **רק לתהליך הזה**. ה-`OLLAMA_HOST` הגלובלי שלך (למשל ה-Mac) לא משתנה. אחר כך הוא בודק עד 30 שניות ש-`/api/tags` עונה. השרת שהופעל ממשיך לרוץ גם אחרי שה-MCP host נסגר: ב-Windows הוא מופעל עם `CREATE_BREAKAWAY_FROM_JOB`, ואם ה-job של ה-host חוסם את זה (למשל `codex exec`) הוא מופעל דרך WMI `Win32_Process.Create`. השיטה מדווחת בשדה `method`, והפלט נכתב ל-`.sessions/ollama-autostart.log`.
 - הבדיקה נעשית בכל קריאה **בלי** סשן, ובקריאה **הראשונה** של כל סשן, לא בכל קריאה בתוך סשן. אם קריאה באמצע סשן נכשלת עם `OLLAMA_UNREACHABLE`, השרת מפעיל את Ollama פעם אחת ומנסה שוב פעם אחת.
 - בדיקת פורט וקובץ נעילה (`.sessions/ollama-autostart.lock`) מונעים הפעלה כפולה.
 - את `ollama` הוא מחפש ב-PATH או ב-`%LOCALAPPDATA%\Programs\Ollama\ollama.exe`.
-- ‏`MCP_CU_AUTOSTART_OLLAMA=0` מכבה את ההפעלה האוטומטית. ‏`health()` מדווח `ollama_autostarted`.
+- ‏`MCP_CU_AUTOSTART_OLLAMA=0` מכבה את ההפעלה האוטומטית; ‏`MCP_CU_AUTOSTART_TIMEOUT` (ברירת מחדל 30). ‏`health()` מדווח `ollama_autostarted`.
 
 ### שחרור זיכרון חכם
 - קריאה בודדת בלי סשן פעיל: המודל נשאר טעון **3 דקות** (`MCP_CU_KEEP_ALIVE_IDLE`).
@@ -664,6 +695,10 @@ $$\text{claude\_code} \longrightarrow \text{codex\_desktop} \longrightarrow \tex
 במקרה של כישלון חוזר `error` עם `code`, ‏`message`, ‏`retryable` ו-`suggestion`, ולצדו `extracted`, הטקסט הקצר שנשלף, כך שהסוכן יכול להמשיך גם בלי המודל.
 
 **זמן קצוב חכם:** בסיס, ועוד תוספת לכל 1,000 תווים, בין מינימום למקסימום. אם המודל עוד לא טעון בזיכרון, מתווספת הקצבה לטעינה.
+
+**זמן קצוב מסתגל** (`adaptive_timeout = true`, ברירת מחדל): אחרי כל קריאה מוצלחת למודל נרשם משך הזמן שלה. קריאות "חמות" נשמרות בחלון של `adaptive_window` (8) הקריאות האחרונות; קריאות שכללו טעינה קרה נשמרות בנפרד ולא משמשות לחישוב. הזמן הבא הוא `max(2 × p90, timeout_min)` ועוד התוספת לכל 1,000 תווים, בתחום `[timeout_min, timeout_max]`, ועוד `cold_load_extra` בטעינה קרה. בלי דגימות משתמשים בנוסחה הקבועה. אחרי `MODEL_TIMEOUT` הזמן הבא מוכפל פי 1.5 (עד `timeout_max`), והצלחה מאפסת את ההגדלה. ההיסטוריה נשמרת בקובץ `timing_stats.json` בתיקיית ה-sessions, כך שגם תהליך חדש (כל ריצה של `codex exec`) מתחיל איתה; קובץ חסר או פגום פשוט מתעלמים ממנו. `adaptive_timeout = false` מחזיר את הנוסחה הקבועה.
+
+**תקציב לקריאה** (`call_budget_seconds`, ברירת מחדל 110, `0` מבטל): סך הזמן לכל קריאת כלי, מתחילתה, כדי שהתשובה או השגיאה המובנית יחזרו לפני שהמארח יחתוך (ב-Codex ‏`tool_timeout_sec = 120`). ההמתנה להפעלה האוטומטית של Ollama מתקצרת כדי להשאיר זמן למודל, וכל זמן קצוב של המודל (`look_at_screen` כולל הניסיון החוזר, `ping`, ובחירת יעד ב-`click`) הוא `min(מחושב, תקציב − זמן שעבר)`. אם נשארו פחות מ-5 שניות, חוזר מיד `MODEL_TIMEOUT` עם הצעה לנסות שוב. התוצאה של `look_at_screen` כוללת `timing` עם `timeout_seconds`, ‏`timeout_source` ‏(`static` / `adaptive` / `bumped`), ‏`samples` ו-`budget_capped`.
 
 ## התקנה ב-Windows (PowerShell)
 דרישות: Python 3.10 ומעלה, ‏Node עם `npm i -g agent-cu`, ו-Ollama.
@@ -692,6 +727,7 @@ mcp-computer-use --ask "Is Claude finished?" --app Claude
 - `MCP_CU_RESOLVE_WITH_MODEL`: שימוש במודל מקומי להכרעה בין מועמדים עמומים (ברירת מחדל: `true`).
 - `MCP_CU_MAX_TYPE_CHARS`: אורך טקסט מרבי להזנה ב-`type_text` (ברירת מחדל: 2000).
 - `MCP_CU_IMAGE_TIMEOUT`: זמן קצוב בשניות לצילום תמונת חלון (ברירת מחדל: 15.0).
+- `MCP_CU_TIMEOUT_BASE` / `_PER_1K_CHARS` / `_MIN` / `_MAX`: זמן ההמתנה לתשובת המודל, `base + per_1k × תווים/1000` בתחום `[min, max]` (ברירות מחדל: 30 / 4 / 20 / 90 שניות). `MCP_CU_COLD_LOAD_EXTRA` (ברירת מחדל: 45) מתווסף כשהמודל לא טעון. `MCP_CU_ADAPTIVE_TIMEOUT` / `MCP_CU_ADAPTIVE_WINDOW` (ברירות מחדל: `true` / 8) וגם `MCP_CU_CALL_BUDGET_SECONDS` (ברירת מחדל: 110). תשובה של `gpt-oss:20b` טעון לוקחת כ-12 שניות במחשב נייד (~11 טוקנים לשנייה), כך שיש מרווח נדיב.
 
 את בדיקת התקינות דרך HTTP מפעילים עם `MCP_CU_HEALTH_HTTP=1`, ואז היא זמינה בכתובת `GET http://127.0.0.1:8765/health`.
 

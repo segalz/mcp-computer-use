@@ -26,12 +26,19 @@ class Config:
     generic_tail_chars: int = 2000  # generic extractor: last N chars of window text
     num_ctx: int = 4096
     temperature: float = 0.0
-    # smart timeout (seconds) = base + per_1k_chars * (chars / 1000), clamped to [min, max]
-    timeout_base: float = 10.0
+    # smart timeout (seconds) = base + per_1k_chars * (chars / 1000), clamped to [min, max].
+    # Sized for a ~11 tok/s laptop where a warm gpt-oss:20b answer takes ~12s (think=low).
+    timeout_base: float = 30.0
     timeout_per_1k_chars: float = 4.0
-    timeout_min: float = 8.0
-    timeout_max: float = 60.0
+    timeout_min: float = 20.0
+    timeout_max: float = 90.0
     cold_load_extra: float = 45.0   # added when the model is not loaded (per /api/ps)
+    # adaptive: base = 2 x p90 of the last adaptive_window warm calls (see timeouts.py); false = static
+    adaptive_timeout: bool = True
+    adaptive_window: int = 8
+    # total wall budget per tool call (window reading + autostart + model); keeps the answer
+    # under the MCP host's tool timeout (Codex tool_timeout_sec = 120). 0 = no cap.
+    call_budget_seconds: float = 110.0
     health_http: bool = False
     health_host: str = "127.0.0.1"
     health_port: int = 8765
@@ -46,7 +53,7 @@ class Config:
     memory_watch: bool = True        # background thread unloads under memory pressure
     memory_watch_interval: float = 30.0
     autostart_ollama: bool = True    # start a local `ollama serve` when the localhost URL is unreachable
-    autostart_timeout: float = 10.0  # seconds to wait for /api/tags after starting
+    autostart_timeout: float = 30.0  # seconds to wait for /api/tags after starting (cold serve can take >10s)
     stateless_hint_window: float = 900.0  # seconds; repeated calls without session_id get a hint
     safety_blocklist: str = ""
     safety_blocklist_extra: str = ""

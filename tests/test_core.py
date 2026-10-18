@@ -96,6 +96,55 @@ def test_choose_app():
     assert choose_app(apps, "anything in notepad?").name == "Notepad"
     assert choose_app(apps, "what is on screen").name == "ChatGPT"  # frontmost
     assert choose_app([], "x") is None
+    # the real foreground window beats agent-cu's frontmost flag; a named app still wins
+    assert choose_app(apps, "what is on screen", foreground=apps[2]).name == "Notepad"
+    assert choose_app(apps, "is claude done?", foreground=apps[2]).name == "Claude"
+
+
+def test_parse_apps_keeps_pid():
+    apps = parse_apps(json.dumps([{"name": "A", "pid": 7}, {"name": "B", "pid": True}, {"name": "C"}]))
+    assert [a.pid for a in apps] == [7, None, None]
+
+
+def test_foreground_app_by_pid_then_frontmost(monkeypatch):
+    apps = [AppInfo("Claude", pid=1), AppInfo("ChatGPT", frontmost=True, pid=2), AppInfo("Notepad", pid=3)]
+    assert agent_cu.foreground_app(apps, pid=3).name == "Notepad"
+    assert agent_cu.foreground_app(apps, pid=99).name == "ChatGPT"  # unknown pid: frontmost flag
+    monkeypatch.setattr(agent_cu, "foreground_pid", lambda: 1)
+    assert agent_cu.foreground_app(apps).name == "Claude"
+    monkeypatch.setattr(agent_cu, "foreground_pid", lambda: None)
+    assert agent_cu.foreground_app([AppInfo("X")]) is None
+
+
+def test_foreground_pid_is_safe():
+    pid = agent_cu.foreground_pid()
+    assert pid is None or (isinstance(pid, int) and pid > 0)
+
+
+def test_look_without_app_reads_foreground_window(cfg, fake_cu, monkeypatch):
+    fake_cu.apps = [{"name": "Claude", "pid": 1, "frontmost": True}, {"name": "ChatGPT", "pid": 2}]
+    monkeypatch.setattr(agent_cu, "foreground_pid", lambda: 2)
+    for app in (None, "", "  "):
+        res = core.look_at_screen("What is on the screen?", app, cfg, make_ollama(cfg))
+        assert "error" not in res and res["windows_seen"] == ["ChatGPT"]
+
+
+def test_look_without_app_falls_back_to_foreground_when_guess_unreadable(cfg, fake_cu, monkeypatch):
+    # the question names an app that has no readable window: read the foreground one instead
+    fake_cu.apps = [{"name": "Ghost", "pid": 1}, {"name": "ChatGPT", "pid": 2}]
+    monkeypatch.setattr(agent_cu, "foreground_pid", lambda: 2)
+    res = core.look_at_screen("what does ghost show?", None, cfg, make_ollama(cfg))
+    assert "error" not in res and res["windows_seen"] == ["ChatGPT"]
+
+
+def test_look_explicit_app_unchanged(cfg, fake_cu, monkeypatch):
+    monkeypatch.setattr(agent_cu, "foreground_pid", lambda: pytest_fail())
+    res = core.look_at_screen("q", "Ghost", cfg, make_ollama(cfg))
+    assert res["error"]["code"] == "APP_NOT_FOUND" and fake_cu.calls[0] == ["text", "-a", "Ghost"]
+
+
+def pytest_fail():
+    raise AssertionError("explicit app must not look at the foreground window")
 
 
 def test_parse_apps_variants():

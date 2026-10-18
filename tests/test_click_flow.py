@@ -353,7 +353,7 @@ def test_core_confirmation_requires_boolean_true(cfg, fake_cu, confirmation):
 
 def test_model_cannot_replace_candidate_metadata(cfg, fake_cu, monkeypatch):
     snapshot(fake_cu, '[@e1] button "Delete file" id=OK\n[@e2] button "Delete folder" id=OK')
-    monkeypatch.setattr(matching, "pick_with_model", lambda *args: agent_cu.Element("@e1", "button", "Harmless"))
+    monkeypatch.setattr(matching, "pick_with_model", lambda *args, **kwargs: agent_cu.Element("@e1", "button", "Harmless"))
     result = core.click("Editor", "OK", cfg, make_ollama(cfg))
     assert result["error"]["code"] == "DANGEROUS_ACTION_NEEDS_CONFIRMATION"
     assert result["would_click"]["name"] == "Delete file" and not fake_cu.clicked
@@ -361,7 +361,7 @@ def test_model_cannot_replace_candidate_metadata(cfg, fake_cu, monkeypatch):
 
 def test_unlisted_model_pick_stays_ambiguous(cfg, fake_cu, monkeypatch):
     snapshot(fake_cu, '[@e1] button "Close"\n[@e2] button "Close"')
-    monkeypatch.setattr(matching, "pick_with_model", lambda *args: agent_cu.Element("@e999", "button", "Close"))
+    monkeypatch.setattr(matching, "pick_with_model", lambda *args, **kwargs: agent_cu.Element("@e999", "button", "Close"))
     result = core.click("Editor", "Close", cfg, make_ollama(cfg))
     assert result["error"]["code"] == "TARGET_AMBIGUOUS" and not fake_cu.clicked
 
@@ -370,7 +370,7 @@ def test_type_model_pick_is_still_checked_for_editability(cfg, fake_cu, monkeypa
     snapshot(fake_cu, '[@e1] button "Body"')
     button = agent_cu.Element("@e1", "button", "Body")
     monkeypatch.setattr(matching, "resolve", lambda *args, **kwargs: matching.Ambiguous([button]))
-    monkeypatch.setattr(matching, "pick_with_model", lambda *args: button)
+    monkeypatch.setattr(matching, "pick_with_model", lambda *args, **kwargs: button)
     result = core.type_text("Editor", "Body", "private", cfg, make_ollama(cfg))
     assert result["error"]["code"] == "TARGET_NOT_EDITABLE" and not fake_cu.typed
 
@@ -414,7 +414,35 @@ def test_type_ambiguous_noneditable_targets(cfg, fake_cu, contents):
     assert_private(result, cfg, "SENTINEL-7f3a")
 
 
-@pytest.mark.parametrize("app", ["", " ", "Editor&Calculator"])
+@pytest.mark.parametrize("app", [None, "", " "])
+@pytest.mark.parametrize("action", ["click", "type", "batch"])
+def test_missing_app_uses_foreground_window(cfg, fake_cu, monkeypatch, app, action):
+    fake_cu.apps = [{"name": "Claude", "pid": 11, "frontmost": False},
+                    {"name": "Editor", "pid": 22, "frontmost": False}]
+    fake_cu.texts["Editor"] = "x"
+    snapshot(fake_cu, '[@e4] textfield "Body"')
+    monkeypatch.setattr(agent_cu, "foreground_pid", lambda: 22)
+    result = (core.click(app, "Body", cfg) if action == "click" else
+              core.click(app, cfg=cfg, steps=["Body"]) if action == "batch" else
+              core.type_text(app, "Body", "hi", cfg))
+    assert result["ok"] and result["app"] == "Editor"
+    assert (fake_cu.typed if action == "type" else fake_cu.clicked) == {
+        "Editor": [("@e4", "hi")] if action == "type" else ["@e4"]}
+
+
+@pytest.mark.parametrize("app", ["", " "])
+@pytest.mark.parametrize("action", ["click", "type", "batch"])
+def test_missing_app_without_foreground_is_app_error(cfg, fake_cu, app, action):
+    fake_cu.apps = [{"name": "Claude", "frontmost": False}]  # nothing in front: never guess for actions
+    result = (core.click(app, "Body", cfg) if action == "click" else
+              core.click(app, cfg=cfg, steps=["Body"]) if action == "batch" else
+              core.type_text(app, "Body", "SENTINEL-7f3a", cfg))
+    assert result["error"]["code"] == "APP_NOT_FOUND" and result["error"]["suggestion"]
+    assert fake_cu.calls == [["apps"]] and not fake_cu.clicked and not fake_cu.typed
+    assert records(cfg)[0]["error_code"] == "APP_NOT_FOUND"
+
+
+@pytest.mark.parametrize("app", ["Editor&Calculator"])
 @pytest.mark.parametrize("action", ["click", "type"])
 def test_invalid_app_has_app_error(cfg, fake_cu, app, action):
     result = (core.click(app, "Body", cfg) if action == "click" else

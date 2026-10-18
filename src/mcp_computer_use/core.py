@@ -1,6 +1,7 @@
 """Business logic for the MCP tools (kept free of MCP imports so it is easy to test)."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import time
@@ -17,9 +18,11 @@ from .extractors.browser import is_browser_app
 from .sessions import Session, sanitize
 from . import memory
 from . import autostart
-from .errors import OLLAMA_UNREACHABLE
+from .errors import OLLAMA_UNREACHABLE, MODEL_TIMEOUT
 from .ollama_client import OllamaClient
-from .timeouts import compute_timeout
+from . import timeouts
+
+_clock = time.monotonic  # call-budget clock (tests replace it)
 
 RAW_FALLBACK_CHARS = 800  # raw text returned to the caller on model failure
 
@@ -67,9 +70,9 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
                    ollama: OllamaClient | None = None,
                    client: str | None = None, session_id: str | None = None,
                    keep_warm: bool = False) -> dict:
-    t0 = time.monotonic()
+    t0 = _clock()
     ollama = ollama or OllamaClient(cfg)
-    elapsed = lambda: round(time.monotonic() - t0, 2)
+    elapsed = lambda: round(_clock() - t0, 2)
     available: list[str] | None = None
 
     # 0) validate the question (callers should send one short English question)
@@ -93,18 +96,28 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
             d["hint"] = hint
         return d
 
-    # 1) pick the window
+    # 1) pick the window (no app: the app named in the question, else the foreground window)
     try:
-        if app:
+        fallback = None
+        if app and app.strip():
             target = app
         else:
             apps = agent_cu.list_apps(cfg.agent_cu_cmd, cfg.agent_cu_timeout)
             available = [a.name for a in apps]
-            chosen = agent_cu.choose_app(apps, question)
+            fg = agent_cu.foreground_app(apps)
+            chosen = agent_cu.choose_app(apps, question, foreground=fg)
             if not chosen:
                 raise CuError(APP_NOT_FOUND, "agent-cu reported no open apps")
             target = chosen.name
-        raw = agent_cu.window_text(target, cfg.agent_cu_cmd, cfg.agent_cu_timeout)
+            if fg and fg.name != target:
+                fallback = fg.name
+        try:
+            raw = agent_cu.window_text(target, cfg.agent_cu_cmd, cfg.agent_cu_timeout)
+        except CuError as e:
+            if e.code != APP_NOT_FOUND or not fallback:
+                raise
+            target = fallback  # the guessed app has no readable window: read the foreground one
+            raw = agent_cu.window_text(target, cfg.agent_cu_cmd, cfg.agent_cu_timeout)
         snapshot = None
         # callers may pass a full window title ("<page> - Google Chrome") as the app;
         # the title is used for browser detection only
@@ -172,30 +185,49 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
     keep_alive, ka_reason = memory.keep_alive_for(cfg, session=session is not None, keep_warm=keep_warm)
     free_before = memory.free_ram_mb()
     # Ollama availability: checked on calls without a session and on the FIRST call of a session only.
+    # Every wait below is capped by what is left of call_budget_seconds (measured from t0).
+    timing_stats = timeouts.stats_for(cfg) if cfg.adaptive_timeout else None
     started = None
     if session is None or session.is_new:
-        started = autostart.ensure_ollama(cfg, ollama)
-    loaded = ollama.is_loaded()
-    timeout = compute_timeout(len(ex.last_message), cfg, model_loaded=loaded)
+        started = autostart.ensure_ollama(_budgeted(cfg, t0), ollama)
+    loaded = _warm(cfg, ollama, started)
+    timeout, timing = _plan_timeout(len(ex.last_message), cfg, loaded, timing_stats, t0)
     user_msg = build_user_message(question, target, detected, ex.last_message, details,
                                   changed if session and not session.is_new else None, previous)
+    model_ran = False
+
+    def chat():
+        nonlocal model_ran
+        if timeout is None:
+            raise CuError(MODEL_TIMEOUT, timeouts.budget_exhausted_message(cfg, _clock() - t0))
+        model_ran = True
+        m0 = _clock()
+        result = ollama.chat_json(load_system_prompt(cfg), user_msg, timeout, keep_alive=keep_alive)
+        timing["model_wall_seconds"] = round(_clock() - m0, 2)
+        return result
+
     try:
         try:
-            answer, stats = ollama.chat_json(load_system_prompt(cfg), user_msg, timeout, keep_alive=keep_alive)
+            answer, stats = chat()
         except CuError as e:
             # mid-session (or check skipped): auto-start once and retry once
             if e.code != OLLAMA_UNREACHABLE or started is not None:
                 raise
-            started = autostart.ensure_ollama(cfg, ollama)
+            started = autostart.ensure_ollama(_budgeted(cfg, t0), ollama)
             if not started.get("reachable"):
                 raise
-            loaded = ollama.is_loaded()
-            timeout = compute_timeout(len(ex.last_message), cfg, model_loaded=loaded)
-            answer, stats = ollama.chat_json(load_system_prompt(cfg), user_msg, timeout, keep_alive=keep_alive)
+            loaded = _warm(cfg, ollama, started)
+            timeout, timing = _plan_timeout(len(ex.last_message), cfg, loaded, timing_stats, t0)
+            answer, stats = chat()
     except CuError as e:
+        if e.code == MODEL_TIMEOUT and model_ran and timing_stats is not None:
+            timing_stats.record_timeout()  # a timeout never shrinks the next timeout: bump it
         extra = {"ollama_autostart": started} if started and started.get("action") != "already_running" else {}
         return done(error_payload(e.code, e.message, windows_seen=[target], extracted=extracted,
-                                  model_used=cfg.model, timeout_seconds=timeout, duration_seconds=elapsed(), **extra))
+                                  model_used=cfg.model, timeout_seconds=timeout, timing=timing,
+                                  duration_seconds=elapsed(), **extra))
+    if timing_stats is not None:
+        timing_stats.record_success(timing["model_wall_seconds"], cold=not loaded)
     mem_info = {"keep_alive": keep_alive, "reason": ka_reason, "was_loaded": loaded}
     if started and started.get("started"):
         mem_info["ollama_autostarted"] = True
@@ -204,7 +236,8 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
     free_after = memory.free_ram_mb()
     if memory.under_pressure(cfg, free_before) or memory.under_pressure(cfg, free_after):
         try:
-            ollama.unload()
+            left = cfg.call_budget_seconds - (_clock() - t0) if cfg.call_budget_seconds > 0 else 15.0
+            ollama.unload(timeout=min(15.0, max(2.0, left)))
             mem_info["unloaded_low_memory"] = True
         except CuError:
             pass
@@ -227,7 +260,38 @@ def look_at_screen(question: str, app: str | None, cfg: Config,
     res = _result(target, status, summary, confidence, details, session, changed, cfg, elapsed(),
                   memory_mb, stats.get("tokens_per_second"))
     res["memory"] = mem_info
+    res["timing"] = timing
     return done(res)
+
+
+def _budgeted(cfg: Config, t0: float) -> Config:
+    """cfg with autostart_timeout shrunk so autostart (WMI launch + readiness poll) leaves
+    at least MIN_MODEL_SECONDS of the call budget for the model."""
+    if cfg.call_budget_seconds <= 0:
+        return cfg
+    left = (cfg.call_budget_seconds - (_clock() - t0) - timeouts.MIN_MODEL_SECONDS
+            - autostart.WMI_TIMEOUT)
+    if left >= cfg.autostart_timeout:
+        return cfg
+    return dataclasses.replace(cfg, autostart_timeout=max(0.0, left))
+
+
+def _plan_timeout(chars: int, cfg: Config, loaded: bool, stats, t0: float) -> tuple[float | None, dict]:
+    """Model timeout (static/adaptive/bumped + cold extra), then capped by the call budget."""
+    t, info = timeouts.model_timeout(chars, cfg, model_loaded=loaded, stats=stats)
+    capped_t, capped = timeouts.budget_cap(t, cfg, _clock() - t0)
+    info = {"timeout_seconds": capped_t, **info, "cold": not loaded,
+            "budget_seconds": cfg.call_budget_seconds}
+    if capped:
+        info["budget_capped"] = True
+    return capped_t, info
+
+
+def _warm(cfg: Config, ollama: OllamaClient, started: dict | None) -> bool:
+    """Model is ready to answer fast: loaded with our num_ctx, on a server that was not just started."""
+    if started and started.get("started"):
+        return False  # a freshly started server has nothing loaded yet: give the cold-load budget
+    return ollama.is_loaded(num_ctx=cfg.num_ctx)
 
 
 def _result(target, status, summary, confidence, details, session, changed, cfg, duration,
@@ -255,21 +319,25 @@ def _result(target, status, summary, confidence, details, session, changed, cfg,
 
 def ping(cfg: Config, ollama: OllamaClient | None = None) -> dict:
     """Heartbeat: server up, local Ollama reachable (auto-start), model answers 'pong'. No screen reading."""
-    t0 = time.monotonic()
+    t0 = _clock()
     ollama = ollama or OllamaClient(cfg)
     out = {"ok": False, "server": True, "ollama": False, "model_reply_ok": False,
            "model": cfg.model, "seconds": 0.0, "cold": False}
-    started = autostart.ensure_ollama(cfg, ollama)
+    started = autostart.ensure_ollama(_budgeted(cfg, t0), ollama)
     if started.get("started"):
         out["ollama_autostarted"] = True
     if not started.get("reachable"):
         out["error"] = f"Ollama at {cfg.ollama_url} unreachable (autostart: {started.get('action')})"
-        out["seconds"] = round(time.monotonic() - t0, 2)
+        out["seconds"] = round(_clock() - t0, 2)
         return out
     out["ollama"] = True
-    out["cold"] = not ollama.is_loaded()
-    timeout = cfg.timeout_base + (cfg.cold_load_extra if out["cold"] else 0)
+    out["cold"] = not _warm(cfg, ollama, started)
+    timeout, _ = timeouts.budget_cap(cfg.timeout_base + (cfg.cold_load_extra if out["cold"] else 0),
+                                     cfg, _clock() - t0)
+    out["timeout_seconds"] = timeout
     try:
+        if timeout is None:
+            raise CuError(MODEL_TIMEOUT, timeouts.budget_exhausted_message(cfg, _clock() - t0))
         reply = ollama.ping_model(timeout, keep_alive=cfg.keep_alive_idle)
         out["model_reply_ok"] = "pong" in reply.lower()
         if not out["model_reply_ok"]:
@@ -277,7 +345,7 @@ def ping(cfg: Config, ollama: OllamaClient | None = None) -> dict:
     except CuError as e:
         out["error"] = f"{e.code}: {e.message}"
     out["ok"] = out["model_reply_ok"]
-    out["seconds"] = round(time.monotonic() - t0, 2)
+    out["seconds"] = round(_clock() - t0, 2)
     return out
 
 
@@ -385,10 +453,30 @@ def _action_result(result: dict, text: str | None) -> dict:
     return scrub(fallback)
 
 
-def _action(action: str, app: str, target: str, cfg: Config, text: str | None = None,
+def _foreground_target(cfg: Config) -> str | None:
+    """App owning the foreground window, for action tools called without app."""
+    try:
+        apps = agent_cu.list_apps(cfg.agent_cu_cmd, cfg.agent_cu_timeout)
+    except CuError:
+        return None
+    # by foreground pid; if that pid is not a listed app, falls back to agent-cu's frontmost flag
+    fg = agent_cu.foreground_app(apps)
+    return fg.name if fg else None
+
+
+def _no_app(app) -> bool:
+    return app is None or (isinstance(app, str) and not app.strip())
+
+
+NO_FOREGROUND_APP = "No app given and no foreground app was found; pass app."
+
+
+def _action(action: str, app: str | None, target: str, cfg: Config, text: str | None = None,
             ollama: OllamaClient | None = None, client: str | None = None,
-            session_id: str | None = None, confirm_dangerous: bool = False) -> dict:
+            session_id: str | None = None, confirm_dangerous: bool = False,
+            call_start: float | None = None) -> dict:
     t0 = time.monotonic()
+    call_start = t0 if call_start is None else call_start  # a click batch is one tool call
     selected = None
     method = None
     confirmed = confirm_dangerous is True
@@ -430,6 +518,10 @@ def _action(action: str, app: str, target: str, cfg: Config, text: str | None = 
 
     if not isinstance(target, str) or not target.strip() or len(target) > 200 or re.fullmatch(r"@e\d+", target.strip()):
         return finish("error", action_errors.INVALID_TARGET, "Pass a visible label of 1 to 200 characters, not a ref.")
+    if _no_app(app):
+        app = _foreground_target(cfg) or ""
+        if not app:
+            return finish("error", APP_NOT_FOUND, NO_FOREGROUND_APP)
     if not isinstance(app, str) or not app.strip() or re.search(r'[&|<>^%"\r\n\x00]', app):
         return finish("error", APP_NOT_FOUND, "Pass a non-empty app name without shell metacharacters.")
     if action == "type":
@@ -467,7 +559,8 @@ def _action(action: str, app: str, target: str, cfg: Config, text: str | None = 
             picked = None
             if cfg.resolve_with_model:
                 try:
-                    picked = matching.pick_with_model(target, candidates, ollama or OllamaClient(cfg), cfg)
+                    picked = matching.pick_with_model(target, candidates, ollama or OllamaClient(cfg), cfg,
+                                                      elapsed=time.monotonic() - call_start)
                 except Exception:
                     picked = None
             selected = next((element for element in candidates
@@ -528,7 +621,7 @@ def _batch_result(result: dict) -> dict:
     return result
 
 
-def click(app: str, target: str | None = None, cfg: Config | None = None,
+def click(app: str | None, target: str | None = None, cfg: Config | None = None,
           ollama: OllamaClient | None = None, client: str | None = None,
           session_id: str | None = None, confirm_dangerous: bool = False,
           steps: list[str] | None = None) -> dict:
@@ -569,6 +662,10 @@ def click(app: str, target: str | None = None, cfg: Config | None = None,
         if not isinstance(step, str) or not step.strip() or len(step) > 200 or re.fullmatch(r"@e\d+", step.strip()):
             return problem(action_errors.INVALID_TARGET, "Every step must be a visible label of 1 to 200 characters, not a ref.",
                            index=index, offending=step)
+    if _no_app(app):
+        app = _foreground_target(cfg) or ""
+        if not app:
+            return problem(APP_NOT_FOUND, NO_FOREGROUND_APP)
     if not isinstance(app, str) or not app.strip() or re.search(r'[&|<>^%"\r\n\x00]', app):
         return problem(APP_NOT_FOUND, "Pass a non-empty app name without shell metacharacters.")
     words = safety.blocklist(cfg)
@@ -582,8 +679,8 @@ def click(app: str, target: str | None = None, cfg: Config | None = None,
     result = {"ok": True, "action": "click", "app": app[:80], "steps": [], "completed": 0}
     for step in steps:
         outcome = _action("click", app, step, cfg, ollama=ollama, client=client,
-                          session_id=session_id, confirm_dangerous=confirm_dangerous)
-        entry = {"target": step, "ok": outcome["ok"]}
+                          session_id=session_id, confirm_dangerous=confirm_dangerous, call_start=t0)
+        entry ={"target": step, "ok": outcome["ok"]}
         for key in ("clicked", "match", "error", "candidates", "would_click", "matched_rule", "hint"):
             if key in outcome:
                 entry[key] = outcome[key]
@@ -596,7 +693,7 @@ def click(app: str, target: str | None = None, cfg: Config | None = None,
     return _batch_result(result)
 
 
-def type_text(app: str, target: str, text: str, cfg: Config, ollama: OllamaClient | None = None,
+def type_text(app: str | None, target: str, text: str, cfg: Config, ollama: OllamaClient | None = None,
               client: str | None = None, session_id: str | None = None,
               confirm_dangerous: bool = False) -> dict:
     return _action("type", app, target, cfg, text=text, ollama=ollama, client=client,
